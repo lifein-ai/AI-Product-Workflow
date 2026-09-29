@@ -1,0 +1,1017 @@
+# Product Spec Schema V0
+
+## 1. Core Principle
+
+Product Spec 是项目当前产品定义的 Single Source of Truth。
+
+它保存：
+
+* 当前已经形成的产品事实；
+* 当前有效的产品决策；
+* 尚未解决的重要问题；
+* Discovery / Solution / Interaction 的结构化结果。
+
+它不保存：
+
+* Conversation History；
+* Prompt；
+* Stage Status；
+* Workflow Transition；
+* PRD正文；
+* Prototype正文；
+* Figma数据；
+* 完整版本历史。
+
+这些属于其他 Runtime / Storage 层。
+
+---
+
+## 2. Top-level Model
+
+```ts
+interface ProductSpec {
+  project: ProjectSpec
+
+  discovery: DiscoverySpec
+  solution: SolutionSpec
+  interaction: InteractionSpec
+
+  openQuestions: OpenQuestion[]
+  decisions: Decision[]
+
+  version: SpecVersion
+}
+```
+
+V0 不增加更多顶层模块。
+
+---
+
+# 3. Project
+
+`Project` 只保存项目身份和原始入口信息。
+
+不得重复保存 Discovery 已经负责维护的问题、目标和范围。
+
+```ts
+interface ProjectSpec {
+  id: string
+  name: string
+
+  initialRequirement: string
+
+  createdAt: string
+  updatedAt: string
+}
+```
+
+例如：
+
+```ts
+{
+  id: "project_creator_pk",
+  name: "Creator PK",
+  initialRequirement: "我想做一个主播PK功能"
+}
+```
+
+`initialRequirement` 保留原始需求，不随后续讨论修改。
+
+---
+
+# 4. Discovery
+
+Discovery 保存：
+
+> 为什么做、为谁做、解决什么问题、朝什么方向做。
+
+```ts
+interface DiscoverySpec {
+  background?: {
+    requirementSource?: string
+    whyNow?: string
+    context?: string
+  }
+
+  problem?: {
+    statement: string
+    impact?: string[]
+  }
+
+  users: {
+    primary: Actor[]
+    related: Actor[]
+  }
+
+  scenarios: Scenario[]
+
+  goals: {
+    primary?: string
+    secondary: string[]
+  }
+
+  currentProduct: {
+    capabilities: string[]
+    currentFlow?: string
+    reusableCapabilities: string[]
+    limitations: string[]
+    problems: string[]
+  }
+
+  direction?: {
+    summary: string
+    rationale: string[]
+  }
+
+  constraints: Constraint[]
+
+  scope: {
+    mustSolve: string[]
+    canDefer: string[]
+    outOfScope: string[]
+  }
+
+  hypotheses: Hypothesis[]
+}
+```
+
+### Actor
+
+```ts
+interface Actor {
+  id: string
+  name: string
+  description?: string
+}
+```
+
+### Scenario
+
+```ts
+interface Scenario {
+  id: string
+  actorId: string
+
+  trigger?: string
+  context: string
+  goal: string
+  currentProblem?: string
+}
+```
+
+### Constraint
+
+```ts
+interface Constraint {
+  id: string
+
+  type:
+    | "BUSINESS"
+    | "TECHNICAL"
+    | "RESOURCE"
+    | "VERSION"
+    | "COMPLIANCE"
+    | "OTHER"
+
+  description: string
+}
+```
+
+### Hypothesis
+
+```ts
+interface Hypothesis {
+  id: string
+  statement: string
+  rationale?: string
+}
+```
+
+Unknown 不存进 `hypotheses`。
+
+Unknown 统一进入 `openQuestions`。
+
+这样可以避免：
+
+```text
+Discovery.hypotheses
+Discovery.unknowns
+OpenQuestions
+```
+
+三套结构同时维护。
+
+---
+
+# 5. Solution
+
+Solution 保存：
+
+> 产品具体如何运行。
+
+```ts
+interface SolutionSpec {
+  capabilities: ProductCapability[]
+
+  objects: BusinessObject[]
+  relationships: ObjectRelationship[]
+
+  flows: BusinessFlow[]
+
+  rules: BusinessRule[]
+
+  stateModels: StateModel[]
+
+  permissions: PermissionRule[]
+
+  exceptions: BusinessException[]
+
+  deliveryScope: {
+    mustBuild: string[]
+    canDefer: string[]
+    outOfScope: string[]
+  }
+
+  dataRequirements: string[]
+}
+```
+
+---
+
+## Product Capability
+
+```ts
+interface ProductCapability {
+  id: string
+  name: string
+
+  purpose: string
+  actors: string[]
+
+  strategy:
+    | "REUSE"
+    | "EXTEND"
+    | "NEW"
+
+  sourceCapability?: string
+}
+```
+
+这里存的是：
+
+> Creator PK
+> Creator Connection
+> Invitation
+
+而不是：
+
+> PK按钮
+> 邀请弹窗
+> 搜索输入框
+
+后者属于 Interaction。
+
+---
+
+## Business Object
+
+```ts
+interface BusinessObject {
+  id: string
+  name: string
+  purpose: string
+}
+```
+
+只建立真正存在业务生命周期或关系的对象。
+
+例如：
+
+```text
+PK Session
+Invitation
+Creator Connection
+```
+
+不要把：
+
+```text
+Button
+Panel
+Result Banner
+```
+
+建成 Business Object。
+
+---
+
+## Object Relationship
+
+```ts
+interface ObjectRelationship {
+  id: string
+
+  fromObjectId: string
+  toObjectId: string
+
+  relationship: string
+}
+```
+
+例如：
+
+```text
+PK Session
+requires
+Creator Connection
+```
+
+只有真正影响业务模型的关系才记录。
+
+---
+
+# 6. Business Flow
+
+```ts
+interface BusinessFlow {
+  id: string
+  name: string
+
+  actors: string[]
+
+  trigger: string
+
+  preconditions: string[]
+
+  steps: BusinessFlowStep[]
+
+  completion?: string
+  exitConditions: string[]
+}
+```
+
+```ts
+interface BusinessFlowStep {
+  order: number
+
+  actor?: string
+  action?: string
+  systemBehavior?: string
+
+  result?: string
+}
+```
+
+这里表达业务流程。
+
+不出现：
+
+```text
+点击右下角按钮
+打开Bottom Sheet
+按钮变灰
+```
+
+这些属于 Interaction。
+
+---
+
+# 7. Business Rule
+
+```ts
+interface BusinessRule {
+  id: string
+
+  name?: string
+  description: string
+
+  appliesTo?: string[]
+
+  rationale?: string
+}
+```
+
+V0 不建议再拆：
+
+```text
+triggerRule
+eligibilityRule
+conflictRule
+limitRule
+```
+
+否则 Schema 很快膨胀。
+
+先统一使用 `BusinessRule`。
+
+需要结构化时再演进。
+
+---
+
+# 8. State Model
+
+只有实际存在生命周期时才创建。
+
+```ts
+interface StateModel {
+  id: string
+  objectId: string
+
+  states: string[]
+
+  transitions: StateTransition[]
+}
+```
+
+```ts
+interface StateTransition {
+  from: string
+  to: string
+
+  trigger: string
+
+  condition?: string
+}
+```
+
+例如：
+
+```text
+PK Session
+
+Preparing
+→ Ongoing
+→ Result
+→ Ended
+```
+
+简单功能不创建 State Model。
+
+---
+
+# 9. Permission
+
+```ts
+interface PermissionRule {
+  id: string
+
+  actorId: string
+
+  action: string
+  objectId?: string
+
+  condition?: string
+
+  allowed: boolean
+}
+```
+
+只记录真实权限差异。
+
+不要为了完整性生成权限矩阵。
+
+---
+
+# 10. Business Exception
+
+```ts
+interface BusinessException {
+  id: string
+
+  trigger: string
+  impact: string
+
+  businessHandling: string
+
+  canDefer?: boolean
+}
+```
+
+这里保存的是业务处理原则。
+
+例如：
+
+```text
+Creator断线
+→ 当前PK无法正常持续
+→ 进入Reconnecting，并保持PK Session
+```
+
+具体界面显示什么属于 Interaction。
+
+---
+
+# 11. Interaction
+
+Interaction 保存：
+
+> 用户如何看到、理解和操作 Solution。
+
+```ts
+interface InteractionSpec {
+  surfaces: InteractionSurface[]
+
+  screens: CanonicalScreen[]
+
+  flows: InteractionFlow[]
+
+  rules: InteractionRule[]
+
+  stateRepresentations: StateRepresentation[]
+
+  recoveries: InteractionRecovery[]
+
+  prototypeRequirements: PrototypeRequirement[]
+}
+```
+
+---
+
+## Interaction Surface
+
+```ts
+interface InteractionSurface {
+  id: string
+  name: string
+
+  strategy:
+    | "REUSE"
+    | "EXTEND"
+    | "ADAPT_PATTERN"
+    | "NEW"
+
+  source?: string
+}
+```
+
+例如：
+
+```text
+LIVE Room
+→ EXTEND
+```
+
+---
+
+## Canonical Screen
+
+```ts
+interface CanonicalScreen {
+  id: string
+  name: string
+
+  responsibility: string
+
+  actors: string[]
+
+  surfaceId?: string
+}
+```
+
+Screen 只根据页面职责创建。
+
+不同业务状态不自动生成不同 Screen。
+
+---
+
+# 12. Interaction Flow
+
+```ts
+interface InteractionFlow {
+  id: string
+  name: string
+
+  actorId: string
+
+  steps: InteractionFlowStep[]
+}
+```
+
+```ts
+interface InteractionFlowStep {
+  order: number
+
+  context: string
+  trigger?: string
+
+  result: string
+
+  screenId?: string
+}
+```
+
+Solution Flow 表达：
+
+> 业务发生什么。
+
+Interaction Flow 表达：
+
+> 用户如何完成它。
+
+两者不要复制相同文本。
+
+---
+
+# 13. Interaction Rule
+
+```ts
+interface InteractionRule {
+  id: string
+
+  context: string
+  trigger: string
+
+  result: string
+
+  feedback?: string
+
+  resultingState?: string
+}
+```
+
+对应统一模型：
+
+```text
+Current State + Trigger
+→ UI Result / Feedback
+→ Result State
+```
+
+---
+
+# 14. State Representation
+
+```ts
+interface StateRepresentation {
+  id: string
+
+  businessState: string
+
+  representation:
+    | "FULL_PAGE"
+    | "OVERLAY"
+    | "COMPONENT_VARIANT"
+    | "LOCAL_STATE"
+    | "INLINE_FEEDBACK"
+    | "SPEC_ONLY"
+
+  target?: string
+
+  description?: string
+}
+```
+
+这里非常重要：
+
+`businessState` 来源于 Solution。
+
+Interaction 只负责指定 Representation。
+
+不得在这里创造新的业务状态。
+
+---
+
+# 15. Interaction Recovery
+
+```ts
+interface InteractionRecovery {
+  id: string
+
+  trigger: string
+
+  userVisibleResult: string
+
+  availableAction?: string
+
+  recoveryOrExit: string
+}
+```
+
+例如：
+
+```text
+PK邀请发送失败
+→ 用户看到发送失败
+→ Retry
+→ 重试邀请或退出
+```
+
+---
+
+# 16. Prototype Requirement
+
+这里不保存 Figma Frame。
+
+只保存：
+
+> 后续 Prototype 必须表达什么。
+
+```ts
+interface PrototypeRequirement {
+  id: string
+
+  type:
+    | "CANONICAL_SCREEN"
+    | "FULL_PAGE_STATE"
+    | "OVERLAY"
+    | "COMPONENT_VARIANT"
+    | "LOCAL_STATE"
+    | "SPEC_ONLY"
+
+  referenceId?: string
+
+  reason: string
+
+  required: boolean
+}
+```
+
+具体 Codex / Figma Asset 属于后续 Artifact Generator。
+
+---
+
+# 17. Open Question
+
+所有 Stage 共用一套 Open Question。
+
+```ts
+interface OpenQuestion {
+  id: string
+
+  stage:
+    | "DISCOVERY"
+    | "SOLUTION"
+    | "INTERACTION"
+
+  question: string
+
+  impact: string
+
+  blocking: boolean
+
+  resolutionMethod:
+    | "DERIVE"
+    | "DEFAULT"
+    | "RESEARCH"
+    | "DATA_VALIDATION"
+    | "STAKEHOLDER_CONFIRMATION"
+    | "TECHNICAL_VALIDATION"
+    | "PRODUCT_DECISION"
+    | "DEFER"
+
+  status:
+    | "OPEN"
+    | "RESOLVED"
+    | "DEFERRED"
+
+  resolution?: string
+}
+```
+
+V0 不建立：
+
+```text
+ResearchQuestion
+TechnicalQuestion
+StakeholderQuestion
+ProductQuestion
+```
+
+四套对象。
+
+统一 Open Question 足够。
+
+---
+
+# 18. Decision
+
+Decision Log 记录重要产品决策。
+
+```ts
+interface Decision {
+  id: string
+
+  stage:
+    | "DISCOVERY"
+    | "SOLUTION"
+    | "INTERACTION"
+
+  decision: string
+
+  rationale: string[]
+
+  affectedPaths: string[]
+
+  status:
+    | "ACTIVE"
+    | "SUPERSEDED"
+
+  supersededBy?: string
+}
+```
+
+例如：
+
+```ts
+{
+  decision: "V1仅支持指定Creator PK，不支持Match PK",
+
+  affectedPaths: [
+    "solution.capabilities",
+    "solution.flows"
+  ],
+
+  status: "ACTIVE"
+}
+```
+
+`affectedPaths` 后面会成为修改上游结论时判断影响范围的重要依据。
+
+所以这个字段值得 V0 保留。
+
+---
+
+# 19. Version
+
+V0 只需要非常轻量的 Version：
+
+```ts
+interface SpecVersion {
+  schemaVersion: "0.1"
+
+  revision: number
+
+  updatedAt: string
+}
+```
+
+`revision` 每次 Product Spec 成功修改后递增。
+
+例如：
+
+```text
+revision 17
+→ update_product_spec
+→ revision 18
+```
+
+V0 暂时不在 Product Spec 内保存完整 Revision Snapshot。
+
+完整版本历史交给数据库。
+
+---
+
+# 20. Ownership Rules
+
+必须明确 Stage 对字段的 Ownership。
+
+```text
+Discovery
+owns
+ProductSpec.discovery
+
+Solution
+owns
+ProductSpec.solution
+
+Interaction
+owns
+ProductSpec.interaction
+```
+
+所有 Stage 都可以操作：
+
+```text
+openQuestions
+decisions
+```
+
+但：
+
+```text
+Solution 不直接修改 Discovery
+Interaction 不直接修改 Solution
+```
+
+如果下游发现上游问题：
+
+```text
+Interaction
+↓
+发现 Business Rule 缺失
+↓
+create_open_question / upstream issue
+↓
+Solution needs review
+```
+
+不能：
+
+```text
+Interaction
+↓
+直接帮 Solution 加一条 Business Rule
+```
+
+这是防止 Product Spec 逐渐失去边界的关键规则。
+
+---
+
+# 21. Explicitly Excluded From V0
+
+以下内容不要现在加入 Product Spec：
+
+* Workflow Stage Status；
+* Ready Evaluation；
+* Conversation；
+* Message；
+* Prompt；
+* Agent；
+* Artifact正文；
+* PRD；
+* Figma Node；
+* Codex Prompt；
+* Research Knowledge Base；
+* Company Knowledge Base；
+* Full Audit Log；
+* Branch；
+* Merge；
+* Collaboration；
+* Comment；
+* Approval；
+* Arbitrary Custom Field；
+* `metadata: any`；
+* Dynamic Schema。
+
+未来真正出现需求再加。
+
+---
+
+# 22. Final Structure
+
+最终 V0：
+
+```text
+ProductSpec
+│
+├── Project
+│
+├── Discovery
+│   ├── Background
+│   ├── Problem
+│   ├── Users
+│   ├── Scenarios
+│   ├── Goals
+│   ├── Current Product
+│   ├── Direction
+│   ├── Constraints
+│   ├── Scope
+│   └── Hypotheses
+│
+├── Solution
+│   ├── Capabilities
+│   ├── Objects
+│   ├── Relationships
+│   ├── Flows
+│   ├── Rules
+│   ├── State Models
+│   ├── Permissions
+│   ├── Exceptions
+│   ├── Delivery Scope
+│   └── Data Requirements
+│
+├── Interaction
+│   ├── Surfaces
+│   ├── Screens
+│   ├── Flows
+│   ├── Rules
+│   ├── State Representations
+│   ├── Recoveries
+│   └── Prototype Requirements
+│
+├── Open Questions
+│
+├── Decisions
+│
+└── Version
+```
+
+## Architecture Rule
+
+一个信息只应该存在一个 Canonical Owner。
+
+Discovery 定义问题。
+
+Solution 定义业务。
+
+Interaction 定义交互。
+
+Decision 记录为什么这样定。
+
+Open Question 记录还不知道什么。
+
+Product Spec 保存当前结果。
+
+Workflow Engine 决定当前做到哪一步。
+
+Artifact Generator 决定如何把结果展示出来。

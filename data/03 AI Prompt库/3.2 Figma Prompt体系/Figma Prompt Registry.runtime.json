@@ -1,0 +1,110 @@
+{
+  "schemaVersion": "figma-prompt-registry.v1",
+  "humanRegistryPath": "Figma Prompt Registry（Figma Prompt能力索引库）.md",
+  "reusableAssetRegistryPath": "Reusable Asset Registry.md",
+  "entries": [
+    {
+      "id": "figma.constraint.prompt-generation",
+      "name": "Prompt Generation Constraint",
+      "layer": "CONSTRAINT",
+      "status": "STABLE",
+      "path": "../Prompt生成总约束.md",
+      "dependencies": [],
+      "selectable": false
+    },
+    {
+      "id": "figma.meta",
+      "name": "Figma Meta",
+      "layer": "META",
+      "status": "STABLE",
+      "path": "Figma Meta Prompt（Prompt分析创建器）.md",
+      "dependencies": ["figma.constraint.prompt-generation"],
+      "selectable": false
+    },
+    {
+      "id": "figma.base.v2",
+      "name": "Figma Base",
+      "layer": "BASE",
+      "status": "STABLE",
+      "path": "Figma Base Prompt V2.md",
+      "dependencies": [],
+      "selectable": true
+    },
+    {
+      "id": "figma.base.v1",
+      "name": "Figma Base V1",
+      "layer": "BASE",
+      "status": "DEPRECATED",
+      "path": "Figma Base Prompt.md",
+      "dependencies": [],
+      "selectable": false
+    },
+    {
+      "id": "figma.capability.backend",
+      "name": "Backend Capability",
+      "layer": "CAPABILITY",
+      "capabilityType": "DOMAIN",
+      "status": "STABLE",
+      "path": "Capability/Backend Design Capability Prompt.md",
+      "dependencies": ["figma.base.v2"],
+      "selectable": true
+    },
+    {
+      "id": "figma.capability.activity",
+      "name": "Activity Design Capability",
+      "layer": "CAPABILITY",
+      "capabilityType": "DOMAIN",
+      "status": "STABLE",
+      "path": "Capability/Activity Design Capability Prompt.md",
+      "dependencies": ["figma.base.v2"],
+      "selectable": true
+    },
+    {
+      "id": "figma.capability.multi-guest-live",
+      "name": "Multi-Guest Live Capability",
+      "layer": "CAPABILITY",
+      "capabilityType": "DOMAIN",
+      "status": "STABLE",
+      "path": "Capability/Multi-Guest Live Capability.md",
+      "dependencies": ["figma.base.v2"],
+      "selectable": true
+    },
+    {
+      "id": "figma.capability.component-reuse",
+      "name": "Component Reuse Capability",
+      "layer": "CAPABILITY",
+      "capabilityType": "SUPPORT",
+      "status": "DRAFT",
+      "path": "Capability/Component Reuse Capability.md",
+      "dependencies": ["figma.base.v2"],
+      "selectable": false
+    },
+    {
+      "id": "figma.maintenance.component-library-governance",
+      "name": "Component Library Governance Capability",
+      "layer": "MAINTENANCE",
+      "status": "STABLE",
+      "path": "Capability/Component Library Governance Capability.md",
+      "dependencies": [],
+      "selectable": false
+    },
+    {
+      "id": "figma.creator.project",
+      "name": "Figma Project Prompt Creator",
+      "layer": "MAINTENANCE",
+      "status": "STABLE",
+      "path": "Project Prompt Creator.md",
+      "dependencies": ["figma.constraint.prompt-generation"],
+      "selectable": false
+    },
+    {
+      "id": "figma.creator.capability",
+      "name": "Figma Capability Prompt Creator",
+      "layer": "MAINTENANCE",
+      "status": "STABLE",
+      "path": "Capability Prompt Creator.md",
+      "dependencies": ["figma.constraint.prompt-generation"],
+      "selectable": false
+    }
+  ]
+}

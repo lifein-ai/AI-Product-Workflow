@@ -1,0 +1,37 @@
+{
+  "name": "ai-product-workflow-v0",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@11.19.0",
+  "engines": { "node": ">=20" },
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "start": "tsx src/server.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "smoke:ai": "tsx scripts/smoke-ai.ts",
+    "e2e:discovery": "tsx scripts/discovery-e2e.ts",
+    "e2e:ready-invalidation": "tsx scripts/discovery-ready-invalidation.ts",
+    "e2e:one-call": "tsx scripts/discovery-one-call-e2e.ts",
+    "e2e:solution": "tsx scripts/solution-e2e.ts",
+    "e2e:v0": "tsx scripts/v0-mainflow-acceptance.ts",
+    "e2e:v0:resume": "tsx scripts/v0-mainflow-acceptance.ts --resume",
+    "e2e:runtime-clean": "tsx scripts/v0-mainflow-acceptance.ts --clean-runtime",
+    "e2e:workspace": "node scripts/workspace-ui-e2e.mjs",
+    "audit:latency": "tsx scripts/latency-audit.ts"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "fastify": "^5.12.4",
+    "openai": "^7.15.0",
+    "pg": "^8.13.1",
+    "zod": "^4.6.4"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.10",
+    "@types/pg": "^8.11.11",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.2"
+  }
+}

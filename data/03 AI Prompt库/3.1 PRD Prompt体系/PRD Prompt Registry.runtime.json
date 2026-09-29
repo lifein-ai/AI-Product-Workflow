@@ -1,0 +1,160 @@
+{
+  "schemaVersion": "prd-prompt-registry.v1",
+  "humanRegistryPath": "PRD Prompt Registry.md",
+  "entries": [
+    {
+      "id": "prd.constraint.prompt-generation",
+      "name": "Prompt Generation Constraint",
+      "layer": "CONSTRAINT",
+      "status": "STABLE",
+      "path": "../Prompt生成总约束.md",
+      "dependencies": [],
+      "selectable": false
+    },
+    {
+      "id": "prd.meta",
+      "name": "PRD Meta",
+      "layer": "META",
+      "status": "STABLE",
+      "path": "PRD Meta Prompt.md",
+      "dependencies": ["prd.constraint.prompt-generation"],
+      "selectable": false
+    },
+    {
+      "id": "prd.base",
+      "name": "PRD Base",
+      "layer": "BASE",
+      "status": "STABLE",
+      "path": "PRD Base Prompt.md",
+      "dependencies": [],
+      "selectable": true
+    },
+    {
+      "id": "prd.capability.feature",
+      "name": "Feature Requirement",
+      "layer": "CAPABILITY",
+      "capabilityType": "GENERAL",
+      "status": "STABLE",
+      "path": "Capability/Feature Requirement Capability Prompt.md",
+      "dependencies": ["prd.base"],
+      "selectable": true
+    },
+    {
+      "id": "prd.capability.activity",
+      "name": "Activity Requirement",
+      "layer": "CAPABILITY",
+      "capabilityType": "GENERAL",
+      "status": "STABLE",
+      "path": "Capability/Activity Requirement Capability Prompt.md",
+      "dependencies": ["prd.base"],
+      "selectable": true
+    },
+    {
+      "id": "prd.capability.live",
+      "name": "Live Requirement",
+      "layer": "CAPABILITY",
+      "capabilityType": "DOMAIN",
+      "status": "STABLE",
+      "path": "Capability/Live Requirement Capability.md",
+      "dependencies": ["prd.base"],
+      "selectable": true
+    },
+    {
+      "id": "prd.capability.room",
+      "name": "Room Requirement",
+      "layer": "CAPABILITY",
+      "capabilityType": "DOMAIN",
+      "status": "STABLE",
+      "path": "Capability/Room Requirement.md",
+      "dependencies": ["prd.base"],
+      "selectable": true
+    },
+    {
+      "id": "prd.capability.backend",
+      "name": "Backend Requirement",
+      "layer": "CAPABILITY",
+      "capabilityType": "GENERAL",
+      "status": "STABLE",
+      "path": "Capability/Backend Requirement Capability Prompt.md",
+      "dependencies": ["prd.base"],
+      "selectable": true
+    },
+    {
+      "id": "prd.capability.prototype-to-requirement",
+      "name": "Prototype To Requirement",
+      "layer": "CAPABILITY",
+      "capabilityType": "SUPPORT",
+      "status": "STABLE",
+      "path": "Capability/Prototype To Requirement Capability Prompt.md",
+      "dependencies": ["prd.base"],
+      "selectable": true
+    },
+    {
+      "id": "prd.capability.activity-rule-extraction",
+      "name": "Activity Rule Extraction",
+      "layer": "CAPABILITY",
+      "capabilityType": "SUPPORT",
+      "status": "STABLE",
+      "path": "Capability/Activity Rule Extraction Capability Prompt.md",
+      "dependencies": ["prd.base", "prd.capability.activity"],
+      "selectable": true
+    },
+    {
+      "id": "prd.capability.social",
+      "name": "Social Requirement",
+      "layer": "CAPABILITY",
+      "capabilityType": "DOMAIN",
+      "status": "DRAFT",
+      "path": null,
+      "dependencies": ["prd.base"],
+      "selectable": false
+    },
+    {
+      "id": "prd.capability.monetization",
+      "name": "Monetization Requirement",
+      "layer": "CAPABILITY",
+      "capabilityType": "DOMAIN",
+      "status": "DRAFT",
+      "path": null,
+      "dependencies": ["prd.base"],
+      "selectable": false
+    },
+    {
+      "id": "prd.capability.user-system",
+      "name": "User System Requirement",
+      "layer": "CAPABILITY",
+      "capabilityType": "DOMAIN",
+      "status": "DRAFT",
+      "path": null,
+      "dependencies": ["prd.base"],
+      "selectable": false
+    },
+    {
+      "id": "prd.project.meeso-multi-guest-live-v1",
+      "name": "Meeso Multi-Guest LIVE V1",
+      "layer": "PROJECT",
+      "status": "STABLE",
+      "path": "Project Prompt/Meeso Multi-Guest LIVE V1.md",
+      "dependencies": [],
+      "selectable": false
+    },
+    {
+      "id": "prd.creator.project",
+      "name": "PRD Project Prompt Creator",
+      "layer": "MAINTENANCE",
+      "status": "STABLE",
+      "path": "PRD Project Prompt Creator.md",
+      "dependencies": ["prd.constraint.prompt-generation"],
+      "selectable": false
+    },
+    {
+      "id": "prd.creator.capability",
+      "name": "PRD Capability Prompt Creator",
+      "layer": "MAINTENANCE",
+      "status": "STABLE",
+      "path": "PRD Capability Prompt Creator.md",
+      "dependencies": ["prd.constraint.prompt-generation"],
+      "selectable": false
+    }
+  ]
+}

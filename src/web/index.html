@@ -1,0 +1,330 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Product Workflow Workspace</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="app-header">
+      <div>
+        <p class="eyebrow">AI Product Workflow</p>
+        <h1 id="workspace-title">Discovery Workspace</h1>
+      </div>
+      <div class="header-meta">
+        <span id="provider-summary" class="provider-summary">AI: Loading…</span>
+        <button id="provider-settings-button" class="secondary-button compact-button" type="button">AI Settings</button>
+        <button id="projects-button" class="secondary-button compact-button" type="button">Projects</button>
+        <button id="new-project-button" class="primary-button compact-button" type="button">New project</button>
+        <span id="revision-badge" class="revision-badge">No project</span>
+        <span id="status-badge" class="status-badge status-empty">NOT_STARTED</span>
+      </div>
+    </header>
+
+    <main class="workspace-shell">
+      <section class="conversation-panel" aria-labelledby="conversation-title">
+        <div class="panel-heading">
+          <div>
+            <p class="section-kicker">Conversation</p>
+            <h2 id="conversation-title">Discovery Conversation</h2>
+          </div>
+          <p id="project-name" class="project-name"></p>
+        </div>
+
+        <div id="create-view" class="create-view">
+          <div class="intro-copy">
+            <span class="step-label">Start a Discovery</span>
+            <h3>Describe the requirement you want to clarify.</h3>
+            <p>The AI will ask focused questions and update the Product Spec on the right after each completed turn.</p>
+          </div>
+          <form id="create-form" class="create-form">
+            <label for="project-name-input">Project name</label>
+            <input id="project-name-input" name="projectName" value="Creator PK Discovery" maxlength="120" />
+            <label for="initial-requirement">Initial Requirement</label>
+            <textarea id="initial-requirement" name="initialRequirement" rows="8" required placeholder="例如：我们刚上线一个主播 1v1 PK 功能……"></textarea>
+            <button id="create-button" class="primary-button" type="submit">Create Project &amp; Start Discovery</button>
+          </form>
+
+          <section class="project-history" aria-labelledby="project-history-title">
+            <div class="history-heading">
+              <div>
+                <p class="section-kicker">Persistent workspace</p>
+                <h3 id="project-history-title">Project history</h3>
+              </div>
+              <button id="reload-projects-button" class="text-button" type="button">Refresh</button>
+            </div>
+            <p id="project-history-summary" class="history-summary">Loading saved projects…</p>
+            <div id="project-list" class="project-list"></div>
+          </section>
+        </div>
+
+        <div id="conversation-view" class="conversation-view" hidden>
+          <div id="conversation-scroll" class="conversation-scroll">
+            <div id="initial-requirement-card" class="requirement-card"></div>
+            <div id="messages" class="messages" aria-live="polite"></div>
+
+          <div id="activity" class="activity" hidden aria-live="polite">
+            <span class="spinner" aria-hidden="true"></span>
+            <div>
+              <strong id="activity-title">Discovery is working</strong>
+              <p id="activity-detail">Model responses can take 30–60 seconds or longer.</p>
+            </div>
+          </div>
+
+          <div id="revision-notice" class="revision-notice" hidden></div>
+          <div id="error-panel" class="error-panel" hidden role="alert">
+              <strong id="error-title">Stage request failed</strong>
+            <p id="error-message"></p>
+            <div class="error-actions">
+              <button id="retry-button" class="secondary-button" type="button" hidden>Retry this message</button>
+              <button id="refresh-button" class="text-button" type="button">Refresh server state</button>
+            </div>
+          </div>
+
+          <div id="confirmation-panel" class="confirmation-panel" hidden>
+            <div>
+              <p class="section-kicker">Ready for your decision</p>
+              <h3 id="confirmation-title">Discovery information is sufficient to proceed.</h3>
+              <p id="confirmation-description">The AI has prepared the Discovery. Only you can confirm it.</p>
+            </div>
+            <button id="confirm-button" class="confirm-button" type="button">Confirm Discovery</button>
+          </div>
+
+          <div id="confirmed-panel" class="confirmed-panel" hidden>
+            <div>
+              <p class="section-kicker">Confirmed</p>
+              <h3 id="confirmed-title">DISCOVERY_CONFIRMED</h3>
+              <p id="confirmed-description">Discovery is frozen at the confirmed content version.</p>
+            </div>
+            <button id="start-solution-button" class="primary-button" type="button">Start Product Solution</button>
+            <button id="generate-prd-button" class="primary-button" type="button" hidden>Generate PRD Requirement Details</button>
+            <button id="continue-interaction-button" class="secondary-button" type="button" disabled hidden>Continue to Interaction Design</button>
+          </div>
+
+          <section id="prd-panel" class="prd-panel" hidden>
+            <div class="prd-heading">
+              <div>
+                <p class="section-kicker">PRD Artifact</p>
+                <h3>Requirement Details</h3>
+              </div>
+              <span id="prd-status" class="status-badge status-empty">NOT_GENERATED</span>
+            </div>
+            <div id="prd-blocking" class="prd-blocking" hidden></div>
+            <button id="return-to-solution-button" class="secondary-button" type="button" hidden>Back to Product Solution</button>
+            <div id="prd-clarification-wrap" class="prd-clarification" hidden>
+              <label for="prd-clarification-answer">Answer the blocking PRD questions</label>
+              <textarea id="prd-clarification-answer" rows="4" placeholder="Provide the confirmed product rules needed to continue generation."></textarea>
+              <button id="submit-prd-clarification-button" class="primary-button" type="button">Continue PRD generation</button>
+            </div>
+            <textarea id="prd-content" rows="18" aria-label="PRD Requirement Details" placeholder="Generate the PRD after Product Solution is confirmed."></textarea>
+            <div class="prd-actions">
+              <span id="prd-source" class="prd-source"></span>
+              <div>
+                <button id="save-prd-button" class="secondary-button" type="button">Save changes</button>
+                <button id="confirm-prd-button" class="confirm-button" type="button">Confirm PRD</button>
+              </div>
+            </div>
+          </section>
+
+          <section id="interaction-panel" class="prd-panel" hidden>
+            <div class="prd-heading">
+              <div>
+                <p class="section-kicker">Interaction Artifact</p>
+                <h3>Interaction Specification</h3>
+              </div>
+              <span id="interaction-status" class="status-badge status-empty">NOT_GENERATED</span>
+            </div>
+            <div id="interaction-blocking" class="prd-blocking" hidden></div>
+            <div id="interaction-clarification-wrap" class="prd-clarification" hidden>
+              <label for="interaction-clarification-answer">Answer the blocking Interaction questions</label>
+              <textarea id="interaction-clarification-answer" rows="4" placeholder="Provide the confirmed detail needed to continue Interaction generation."></textarea>
+              <button id="submit-interaction-clarification-button" class="primary-button" type="button">Continue Interaction generation</button>
+            </div>
+            <textarea id="interaction-content" rows="18" aria-label="Interaction Specification" placeholder="Confirm the PRD, then generate the Interaction Specification."></textarea>
+            <div class="prd-actions">
+              <span id="interaction-source" class="prd-source"></span>
+              <div>
+                <button id="generate-interaction-button" class="primary-button" type="button">Generate Interaction Specification</button>
+                <button id="save-interaction-button" class="secondary-button" type="button">Save changes</button>
+                <button id="confirm-interaction-button" class="confirm-button" type="button">Confirm Interaction</button>
+              </div>
+            </div>
+          </section>
+
+          <section id="figma-prompt-panel" class="prd-panel" hidden>
+            <div class="prd-heading">
+              <div>
+                <p class="section-kicker">Codex Artifact</p>
+                <h3>Figma Prototype Prompt</h3>
+              </div>
+              <span id="figma-prompt-status" class="status-badge status-empty">NOT_GENERATED</span>
+            </div>
+            <div id="figma-prompt-blocking" class="prd-blocking" hidden></div>
+            <textarea id="figma-prompt-content" rows="18" aria-label="Codex Figma Prototype Prompt" placeholder="Confirm the PRD, then assemble the Codex Figma prototype prompt."></textarea>
+            <div class="prd-actions">
+              <span id="figma-prompt-source" class="prd-source"></span>
+              <div>
+                <button id="generate-figma-prompt-button" class="primary-button" type="button">Assemble Codex Figma Prompt</button>
+                <button id="save-figma-prompt-button" class="secondary-button" type="button">Save changes</button>
+                <button id="copy-figma-prompt-button" class="secondary-button" type="button">Copy prompt</button>
+                <button id="confirm-figma-prompt-button" class="confirm-button" type="button">Confirm prompt</button>
+              </div>
+            </div>
+          </section>
+          </div>
+
+          <form id="message-form" class="message-form">
+            <label id="message-input-label" for="message-input">Your answer</label>
+            <textarea id="message-input" rows="4" required placeholder="Answer the current Discovery question…"></textarea>
+            <div class="composer-footer">
+              <span>Ctrl / ⌘ + Enter to send</span>
+              <button id="send-button" class="primary-button" type="submit">Send Answer</button>
+            </div>
+          </form>
+        </div>
+      </section>
+
+      <aside class="spec-panel" aria-labelledby="spec-title">
+        <div class="panel-heading spec-heading">
+          <div>
+            <p class="section-kicker">Server state</p>
+            <h2 id="spec-title">Live Product Spec</h2>
+          </div>
+          <span id="spec-revision" class="spec-revision">Revision —</span>
+        </div>
+
+        <section id="readiness-card" class="readiness-card">
+          <div class="readiness-title-row">
+            <h3 id="readiness-title">Discovery Status</h3>
+            <span id="readiness-status">NOT_STARTED</span>
+          </div>
+          <div id="readiness-reasons" class="readiness-reasons">
+            Create a project to begin Discovery.
+          </div>
+        </section>
+
+        <div id="spec-content" class="spec-content"></div>
+
+        <section class="side-section questions-section">
+          <div class="section-title-row">
+            <h3>Blocking Open Questions</h3>
+            <span id="blocking-count" class="count-badge count-danger">0</span>
+          </div>
+          <div id="blocking-questions" class="card-list"></div>
+        </section>
+
+        <section class="side-section questions-section">
+          <div class="section-title-row">
+            <h3>Non-blocking Open Questions</h3>
+            <span id="nonblocking-count" class="count-badge">0</span>
+          </div>
+          <div id="nonblocking-questions" class="card-list"></div>
+        </section>
+
+        <section class="side-section decisions-section">
+          <div class="section-title-row">
+            <h3 id="decisions-title">Discovery Decisions</h3>
+            <span class="fact-decision-key"><i></i> Product decision</span>
+          </div>
+          <div id="active-decisions" class="card-list"></div>
+          <details id="superseded-decisions-wrap" class="superseded-wrap" hidden>
+            <summary>Superseded decisions (<span id="superseded-count">0</span>)</summary>
+            <div id="superseded-decisions" class="card-list"></div>
+          </details>
+        </section>
+
+        <section id="project-storage-section" class="side-section storage-section" hidden>
+          <div class="section-title-row">
+            <h3>Project files &amp; cleanup</h3>
+            <span id="storage-kind" class="count-badge">LOCAL</span>
+          </div>
+          <label class="storage-label" for="manage-project-name">Project name</label>
+          <div class="rename-row">
+            <input id="manage-project-name" maxlength="120" />
+            <button id="rename-project-button" class="secondary-button" type="button">Rename</button>
+          </div>
+          <div class="artifact-file-list">
+            <div class="artifact-file-row">
+              <div><strong>Project record</strong><span id="project-record-detail">—</span></div>
+              <button id="export-project-button" class="text-button" type="button">Export</button>
+            </div>
+            <div class="artifact-file-row">
+              <div><strong>PRD Requirement Details</strong><span id="prd-file-detail">NOT_GENERATED</span></div>
+              <button id="clear-prd-button" class="text-button danger-button" type="button">Clear</button>
+            </div>
+            <div class="artifact-file-row">
+              <div><strong>Interaction Specification</strong><span id="interaction-file-detail">NOT_GENERATED</span></div>
+              <button id="clear-interaction-button" class="text-button danger-button" type="button">Clear</button>
+            </div>
+            <div class="artifact-file-row">
+              <div><strong>Codex Figma prompt</strong><span id="figma-file-detail">NOT_GENERATED</span></div>
+              <button id="clear-figma-button" class="text-button danger-button" type="button">Clear</button>
+            </div>
+          </div>
+          <p class="cleanup-note">Clearing PRD also clears downstream Interaction and Figma artifacts. Prompt assets and source code are never deleted here.</p>
+          <div class="cleanup-actions">
+            <button id="cleanup-artifacts-button" class="secondary-button" type="button">Clean stale / failed artifacts</button>
+            <button id="delete-project-button" class="secondary-button destructive-button" type="button">Delete project</button>
+          </div>
+        </section>
+      </aside>
+    </main>
+
+    <dialog id="provider-dialog" class="provider-dialog" aria-labelledby="provider-dialog-title">
+      <div class="provider-dialog-heading">
+        <div>
+          <p class="section-kicker">Server-side configuration</p>
+          <h2 id="provider-dialog-title">API &amp; Model Library</h2>
+          <p>API keys stay on this server and are never returned to the browser.</p>
+        </div>
+        <button id="provider-dialog-close" class="text-button" type="button" aria-label="Close provider settings">Close</button>
+      </div>
+
+      <div id="provider-library-error" class="provider-library-error" hidden></div>
+      <section class="provider-current-card">
+        <span>Current</span>
+        <strong id="provider-current-name">Loading…</strong>
+        <small id="provider-current-model">—</small>
+      </section>
+
+      <section class="provider-library-section">
+        <div class="provider-section-heading">
+          <div>
+            <p class="section-kicker">Available providers</p>
+            <h3>Saved APIs and models</h3>
+          </div>
+        </div>
+        <div id="provider-profile-list" class="provider-profile-list"></div>
+      </section>
+
+      <section class="provider-library-section provider-form-section">
+        <div class="provider-section-heading">
+          <div>
+            <p class="section-kicker">OpenAI-compatible API</p>
+            <h3 id="provider-form-title">Add API profile</h3>
+          </div>
+          <button id="provider-form-cancel" class="text-button" type="button" hidden>Cancel edit</button>
+        </div>
+        <form id="provider-form" class="provider-form">
+          <input id="provider-edit-id" type="hidden" />
+          <label for="provider-name-input">Profile name</label>
+          <input id="provider-name-input" maxlength="120" required placeholder="Example: Production Relay" />
+          <label for="provider-base-url-input">Base URL</label>
+          <input id="provider-base-url-input" type="url" required placeholder="https://example.com/v1" />
+          <label for="provider-api-key-input">API key</label>
+          <input id="provider-api-key-input" type="password" autocomplete="new-password" placeholder="Required when adding; leave blank to keep existing key" />
+          <label for="provider-models-input">Models</label>
+          <textarea id="provider-models-input" rows="4" required placeholder="One model per line, for example:&#10;gpt-5.6-terra&#10;gpt-5.6-sol"></textarea>
+          <label for="provider-default-model-input">Default model</label>
+          <input id="provider-default-model-input" maxlength="200" placeholder="Defaults to the first model above" />
+          <div class="provider-form-actions">
+            <button id="provider-save-button" class="primary-button" type="submit">Save API profile</button>
+          </div>
+        </form>
+      </section>
+    </dialog>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

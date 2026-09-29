@@ -1,0 +1,51 @@
+# Dependencies and package-manager cache
+node_modules/
+.pnpm-store/
+
+# Build, test, and generated output
+dist/
+build/
+coverage/
+reports/
+benchmark-*.json
+*.tsbuildinfo
+.cache/
+.turbo/
+
+# Local environment and secrets. Keep the documented template tracked.
+.env
+.env.*
+!.env.example
+
+# Local application state, logs, and temporary files
+.runtime/
+.tmp/
+*.log
+*.log.*
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.tmp
+*.bak
+
+# Local databases and private key material
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+
+# Editors and operating systems
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+Desktop.ini
