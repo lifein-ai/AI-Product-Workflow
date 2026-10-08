@@ -29,6 +29,15 @@ function normalizeProject(value: ProjectRecord): ProjectRecord {
     decision.source ??= { type: "LEGACY" };
     decision.createdAt ??= legacyTimestamp;
     decision.updatedAt ??= legacyTimestamp;
+    decision.projectId ??= value.id;
+    decision.feature ??= decision.stage;
+    decision.topic ??= decision.decision;
+    decision.reason ??= decision.rationale?.join(" · ") || null;
+    decision.alternatives ??= [];
+    decision.importance ??= 2;
+    decision.strength ??= "EXPLICIT";
+    decision.sourceMessageIds ??= decision.source?.messageId ? [decision.source.messageId] : [];
+    decision.history ??= [];
   }
   for (const question of value.productSpec.openQuestions ?? []) question.source ??= { type: "LEGACY" };
   if (value.artifacts.figmaPrompt.lifecycleStatus === "CURRENT" && value.artifacts.interaction.lifecycleStatus !== "CURRENT") {
@@ -36,6 +45,7 @@ function normalizeProject(value: ProjectRecord): ProjectRecord {
     value.artifacts.figmaPrompt.updatedAt = timestamp;
   }
   value.messages ??= [];
+  value.decisionMemory ??= { status: "IDLE" };
   return value;
 }
 

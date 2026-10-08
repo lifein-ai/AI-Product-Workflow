@@ -24,6 +24,9 @@ export class InteractionService {
 
   async generate(projectId: string): Promise<{ artifact: InteractionArtifactState; project: ProjectRecord }> {
     const project = await this.loadProject(projectId);
+    if (project.artifacts.interaction.lifecycleStatus === "CURRENT") {
+      throw new Error("Current Interaction Specification must be cleared before generating a replacement");
+    }
     const context = buildInteractionSourceContext(project);
     const prompt = await readFile(this.promptPath, "utf8");
     const generation = normalizeGenerationQuestions(await this.runGeneration(prompt, context));

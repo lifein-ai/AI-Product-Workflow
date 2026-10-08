@@ -38,7 +38,8 @@ export function executeStageTurn(
   rawArgs: unknown,
   responseBaseRevision = project.productSpec.version.revision,
   decisionSource?: NonNullable<Decision["source"]>,
-  initialCompatibilityWarnings: string[] = []
+  initialCompatibilityWarnings: string[] = [],
+  allowPartialOperations = true
 ): StageTurnExecutionResult {
   const input = completeDiscoveryTurnSchema.parse(rawArgs);
   if (input.expectedRevision !== responseBaseRevision) {
@@ -58,7 +59,7 @@ export function executeStageTurn(
       result = executeTool(draft, kind, payload, responseBaseRevision, decisionSource);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      if (isHardStageTurnError(message)) {
+      if (isHardStageTurnError(message) || !allowPartialOperations) {
         throw new Error(`Operation ${operationIndex + 1} (${kind}) failed: ${message}`, { cause: error });
       }
       compatibilityWarnings.push(`Operation ${operationIndex + 1} (${kind}) was not applied: ${message}`);
@@ -373,9 +374,24 @@ function recordDecision(
   const timestamp = now();
   const item = {
     id: randomUUID(),
+    projectId: project.id,
     stage,
+    feature: stage,
+    topic: input.decision,
     decision: input.decision,
     rationale: input.rationale,
+    reason: input.rationale.join(" · "),
+    alternatives: [],
+    importance: 2 as const,
+    strength: "EXPLICIT" as const,
+    sourceMessageIds: decisionSource?.messageId ? [decisionSource.messageId] : [],
+    history: [{
+      action: "CREATED" as const,
+      at: timestamp,
+      decision: input.decision,
+      reason: input.rationale.join(" · "),
+      sourceMessageIds: decisionSource?.messageId ? [decisionSource.messageId] : []
+    }],
     affectedPaths,
     status: input.status ?? "ACTIVE" as const,
     source: decisionSource ?? { type: "SYSTEM" as const },

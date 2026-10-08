@@ -9,8 +9,22 @@ export interface StageConfig {
   contextRoots: Array<"project" | "discovery" | "solution" | "interaction" | "openQuestions" | "decisions">;
   allowedTools: string[];
   modelTools: string[];
-  exitCriteriaIds: string[];
+  exitCriteriaIds: readonly string[];
 }
+
+export const DISCOVERY_TOOL_NAME = "complete_discovery_turn";
+export const DISCOVERY_CRITERION_IDS = [
+  "problem_clarity",
+  "user_clarity",
+  "scenario_clarity",
+  "goal_clarity",
+  "behavior_change_basis",
+  "current_product_clarity",
+  "direction_clarity",
+  "scope_clarity",
+  "constraint_clarity",
+  "evidence_sufficiency"
+] as const;
 
 export const stageRegistry: Record<ReasoningStage, StageConfig> = {
   DISCOVERY: {
@@ -25,19 +39,8 @@ export const stageRegistry: Record<ReasoningStage, StageConfig> = {
       "request_validation",
       "evaluate_stage"
     ],
-    modelTools: ["complete_discovery_turn"],
-    exitCriteriaIds: [
-      "problem_clarity",
-      "user_clarity",
-      "scenario_clarity",
-      "goal_clarity",
-      "behavior_change_basis",
-      "current_product_clarity",
-      "direction_clarity",
-      "scope_clarity",
-      "constraint_clarity",
-      "evidence_sufficiency"
-    ]
+    modelTools: [DISCOVERY_TOOL_NAME],
+    exitCriteriaIds: DISCOVERY_CRITERION_IDS
   },
   SOLUTION: {
     id: "SOLUTION",

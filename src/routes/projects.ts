@@ -7,7 +7,7 @@ import type { RuntimeService } from "../runtime/runtime-service.js";
 import type { PrdService } from "../prd/prd-service.js";
 import type { FigmaPromptService } from "../figma/figma-prompt-service.js";
 import type { InteractionService } from "../interaction/interaction-service.js";
-import { confirmStage, reopenSolution } from "../workflow/state-machine.js";
+import { confirmStage, reopenDiscovery, reopenSolution } from "../workflow/state-machine.js";
 import { randomUUID } from "node:crypto";
 import {
   measureLatencyStep,
@@ -16,6 +16,8 @@ import {
   withLatencyRequest
 } from "../observability/latency-trace.js";
 import type { RequestProgressStore } from "../runtime/request-progress.js";
+import { ManualBridgeResponseError, type ManualBridgeService } from "../runtime/manual-bridge-service.js";
+import type { DecisionMemoryService } from "../decisions/decision-memory-service.js";
 
 export async function projectRoutes(app: FastifyInstance, deps: {
   repo: ProjectRepository;
@@ -24,10 +26,13 @@ export async function projectRoutes(app: FastifyInstance, deps: {
   interaction?: InteractionService;
   figmaPrompt?: FigmaPromptService;
   requestProgress?: RequestProgressStore;
+  manualBridge?: ManualBridgeService;
+  decisionMemory?: DecisionMemoryService;
 }) {
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof z.ZodError) return reply.code(400).send({ error: "Invalid request", details: error.issues });
     if (!(error instanceof Error)) return reply.code(500).send({ error: "Internal server error" });
+    if (error instanceof ManualBridgeResponseError) return reply.code(400).send({ error: error.message });
     if (error.message === "Project not found") return reply.code(404).send({ error: error.message });
     if (/^MODELFLARE_(API_KEY|BASE_URL|MODEL) is required/.test(error.message)) return reply.code(503).send({ error: error.message });
     if (error.message === "ModelFlare connection failed") return reply.code(502).send({ error: error.message });
@@ -47,7 +52,7 @@ export async function projectRoutes(app: FastifyInstance, deps: {
     if (/^(DISCOVERY|SOLUTION) turn repair failed:/.test(error.message)) {
       return reply.code(502).send({ error: "AI response failed workflow validation after one repair" });
     }
-    if (/changed concurrently|not ready for confirmation|Cannot run|must be confirmed|cannot be started|no longer current|must be generated|current draft|blocking open questions|must be current and confirmed|based on stale|blocked on open questions|must be blocked|Prompt assets changed|Prompt changed|Confirmed Product State/.test(error.message)) {
+    if (/Stale Product Spec revision|changed concurrently|not ready for confirmation|Cannot run|must be confirmed|cannot be started|no longer current|must be generated|must be cleared|current draft|blocking open questions|must be current and confirmed|based on stale|blocked on open questions|must be blocked|Prompt assets changed|Prompt changed|Confirmed Product State/.test(error.message)) {
       return reply.code(409).send({ error: error.message });
     }
     app.log.error(error);
@@ -185,6 +190,39 @@ export async function projectRoutes(app: FastifyInstance, deps: {
     });
   });
 
+  app.post("/projects/:id/manual-bridge/prompt", async request => {
+    if (!deps.manualBridge) throw new Error("Manual Bridge service is not configured");
+    const { id } = z.object({ id: z.string() }).parse(request.params);
+    const input = z.object({
+      kind: z.enum(["USER_MESSAGE", "SOLUTION_START"]).optional(),
+      content: z.string().optional()
+    }).parse(request.body ?? {});
+    return deps.manualBridge.preparePrompt(id, input);
+  });
+
+  app.post("/projects/:id/manual-bridge/apply", async request => {
+    if (!deps.manualBridge) throw new Error("Manual Bridge service is not configured");
+    const { id } = z.object({ id: z.string() }).parse(request.params);
+    const input = z.object({
+      stage: z.enum(["DISCOVERY", "SOLUTION"]),
+      kind: z.enum(["USER_MESSAGE", "SOLUTION_START"]),
+      expectedRevision: z.number().int().nonnegative(),
+      expectedRecordVersion: z.number().int().nonnegative(),
+      turnToken: z.string().regex(/^[a-f0-9]{64}$/),
+      userMessage: z.string().trim().min(1),
+      response: z.string().trim().min(1).max(2_000_000)
+    }).parse(request.body);
+    return deps.manualBridge.applyResponse(id, input);
+  });
+
+  app.post("/projects/:id/decisions/scan", async request => {
+    if (!deps.decisionMemory) throw new Error("Decision Memory service is not configured");
+    const { id } = z.object({ id: z.string() }).parse(request.params);
+    const decisionScan = await deps.decisionMemory.scanNow(id);
+    if (decisionScan.status === "FAILED") request.log.warn({ project_id: id, error: decisionScan.error }, "Decision Memory scan failed");
+    return { decisionScan, project: await requireProject(deps.repo, id) };
+  });
+
   app.post("/projects/:id/stages/discovery/confirm", async request => {
     const { id } = z.object({ id: z.string() }).parse(request.params);
     const project = await deps.repo.getById(id);
@@ -192,6 +230,14 @@ export async function projectRoutes(app: FastifyInstance, deps: {
     confirmStage(project, "DISCOVERY");
     await deps.repo.save(project);
     return project.workflow;
+  });
+
+  app.post("/projects/:id/stages/discovery/reopen", async request => {
+    const { id } = z.object({ id: z.string() }).parse(request.params);
+    const project = await requireProject(deps.repo, id);
+    reopenDiscovery(project);
+    await deps.repo.save(project);
+    return { project };
   });
 
   app.post("/projects/:id/stages/solution/start", async (request, reply) => {
@@ -223,10 +269,11 @@ export async function projectRoutes(app: FastifyInstance, deps: {
     return { project };
   });
 
-  app.post("/projects/:id/artifacts/prd/generate", async request => {
+  app.post("/projects/:id/artifacts/prd/generate", async (request, reply) => {
     if (!deps.prd) throw new Error("PRD service is not configured");
     const { id } = z.object({ id: z.string() }).parse(request.params);
-    return deps.prd.generate(id);
+    return trackedGeneration(request.headers["x-request-id"], reply, deps.requestProgress, id,
+      "Selecting PRD capabilities and generating Requirement Details.", () => deps.prd!.generate(id));
   });
 
   app.patch("/projects/:id/artifacts/prd", async request => {
@@ -236,11 +283,12 @@ export async function projectRoutes(app: FastifyInstance, deps: {
     return deps.prd.update(id, content);
   });
 
-  app.post("/projects/:id/artifacts/prd/clarify", async request => {
+  app.post("/projects/:id/artifacts/prd/clarify", async (request, reply) => {
     if (!deps.prd) throw new Error("PRD service is not configured");
     const { id } = z.object({ id: z.string() }).parse(request.params);
     const { answer } = z.object({ answer: z.string().trim().min(1) }).parse(request.body);
-    return deps.prd.clarifyAndGenerate(id, answer);
+    return trackedGeneration(request.headers["x-request-id"], reply, deps.requestProgress, id,
+      "Applying the clarification and continuing PRD generation.", () => deps.prd!.clarifyAndGenerate(id, answer));
   });
 
   app.post("/projects/:id/artifacts/prd/confirm", async request => {
@@ -249,17 +297,19 @@ export async function projectRoutes(app: FastifyInstance, deps: {
     return deps.prd.confirm(id);
   });
 
-  app.post("/projects/:id/artifacts/interaction/generate", async request => {
+  app.post("/projects/:id/artifacts/interaction/generate", async (request, reply) => {
     if (!deps.interaction) throw new Error("Interaction service is not configured");
     const { id } = z.object({ id: z.string() }).parse(request.params);
-    return deps.interaction.generate(id);
+    return trackedGeneration(request.headers["x-request-id"], reply, deps.requestProgress, id,
+      "Generating the Interaction Specification.", () => deps.interaction!.generate(id));
   });
 
-  app.post("/projects/:id/artifacts/interaction/clarify", async request => {
+  app.post("/projects/:id/artifacts/interaction/clarify", async (request, reply) => {
     if (!deps.interaction) throw new Error("Interaction service is not configured");
     const { id } = z.object({ id: z.string() }).parse(request.params);
     const { answer } = z.object({ answer: z.string().trim().min(1) }).parse(request.body);
-    return deps.interaction.clarifyAndGenerate(id, answer);
+    return trackedGeneration(request.headers["x-request-id"], reply, deps.requestProgress, id,
+      "Applying the clarification and continuing Interaction generation.", () => deps.interaction!.clarifyAndGenerate(id, answer));
   });
 
   app.patch("/projects/:id/artifacts/interaction", async request => {
@@ -275,10 +325,11 @@ export async function projectRoutes(app: FastifyInstance, deps: {
     return deps.interaction.confirm(id);
   });
 
-  app.post("/projects/:id/artifacts/figma-prompt/generate", async request => {
+  app.post("/projects/:id/artifacts/figma-prompt/generate", async (request, reply) => {
     if (!deps.figmaPrompt) throw new Error("Figma Prompt service is not configured");
     const { id } = z.object({ id: z.string() }).parse(request.params);
-    return deps.figmaPrompt.generate(id);
+    return trackedGeneration(request.headers["x-request-id"], reply, deps.requestProgress, id,
+      "Selecting Figma capabilities and assembling the Codex prompt.", () => deps.figmaPrompt!.generate(id));
   });
 
   app.patch("/projects/:id/artifacts/figma-prompt", async request => {
@@ -293,6 +344,28 @@ export async function projectRoutes(app: FastifyInstance, deps: {
     const { id } = z.object({ id: z.string() }).parse(request.params);
     return deps.figmaPrompt.confirm(id);
   });
+}
+
+async function trackedGeneration<T>(
+  suppliedRequestId: string | string[] | undefined,
+  reply: { header(name: string, value: string): unknown },
+  progress: RequestProgressStore | undefined,
+  projectId: string,
+  detail: string,
+  action: () => Promise<T>
+): Promise<T> {
+  const requestId = typeof suppliedRequestId === "string" && suppliedRequestId.length <= 128 ? suppliedRequestId : randomUUID();
+  reply.header("x-request-id", requestId);
+  progress?.start(requestId, projectId);
+  progress?.update(requestId, "PROVIDER_CALL", detail);
+  try {
+    const result = await action();
+    progress?.update(requestId, "COMPLETED", "The generated artifact was saved and is ready for review.");
+    return result;
+  } catch (error) {
+    progress?.update(requestId, "FAILED", "Generation failed before a new artifact could be saved.");
+    throw error;
+  }
 }
 
 async function requireProject(repo: ProjectRepository, id: string) {

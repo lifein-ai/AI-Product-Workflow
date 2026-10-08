@@ -68,7 +68,7 @@ console.log(`Detailed service log: ${serverLogPath}`);
 console.log();
 
 const commandShell = process.env.ComSpec || "C:\\Windows\\System32\\cmd.exe";
-const service = spawn(commandShell, ["/d", "/s", "/c", "pnpm dev"], {
+const service = spawn(commandShell, ["/d", "/s", "/c", "pnpm start"], {
   cwd: projectRoot,
   env: process.env,
   windowsHide: false,
@@ -89,7 +89,7 @@ service.stderr.on("data", chunk => {
   if (failurePattern.test(text)) startupFailure = text.trim();
 });
 service.once("error", error => {
-  startupFailure = `Unable to start pnpm dev: ${error.message}`;
+  startupFailure = `Unable to start pnpm start: ${error.message}`;
   logStartup(startupFailure);
 });
 service.once("exit", code => {

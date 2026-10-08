@@ -9,6 +9,12 @@
 - Stage Registry
 - Context Builder
 - OpenAI Responses API 单次调用普通 Turn（异常校验失败最多一次 repair）
+- ChatGPT Manual Bridge（实验性）
+  - 与 API / Local Codex 模式并存，可随时切换
+  - Workflow 生成包含当前 Stage Context 与结构化协议的 Prompt
+  - 用户手动 Copy 到 ChatGPT、Paste 完整返回；不调用第二个模型解释结果
+  - 自然语言回答正常进入会话，固定边界内的 JSON 复用现有 Turn Schema、Validation、State Update 和 Repository
+  - Prompt 同时绑定 Product Spec Revision、Project Record Version 与回合完整性 Token，过期或错配返回整轮拒绝
 - 2 个 Stage-specific Model-facing Turn Tool：`complete_discovery_turn`、`complete_solution_turn`
 - 5 个 Server-side deterministic operations
   - `update_product_spec`
@@ -59,7 +65,7 @@
 
 需要 Node.js 20 或更新版本；本地已验证版本记录在 `.node-version`（24.19.0）。项目默认使用本地文件持久化，无需启动 PostgreSQL。
 
-Windows 可直接双击 [`启动 Workflow.bat`](./启动%20Workflow.bat)，选择 `Local Codex` 或 `Relay API`。脚本会检查 Node、pnpm、3000 端口以及 Codex CLI/登录状态，设置本次进程的 `AI_PROVIDER`，启动服务并在健康检查通过后打开 `http://localhost:3000`。
+Windows 可直接双击 [`启动 Workflow.bat`](./启动%20Workflow.bat)。脚本会复用 AI Settings 中上次激活的 Provider；若服务已经运行则直接打开浏览器，否则检查 Node、pnpm 和 3000 端口，启动服务并在健康检查通过后打开 `http://localhost:3000`。如果保存的 Codex Local 登录已失效且已有 Relay 配置，启动时会自动回退到 Relay，避免因无法进入 AI Settings 而卡死；没有可用回退时，启动日志会给出具体原因。
 
 ```bash
 pnpm install
@@ -73,6 +79,12 @@ pnpm dev
 启动后访问 `http://localhost:3000`，即可通过双栏 Workspace 完成 Discovery 与 Product Solution；Solution 确认后可以按现有 PRD Prompt Registry 自动选择并组装 Prompt，生成、编辑和确认 PRD Requirement Details。服务默认仅监听 `127.0.0.1`，避免未认证的项目与 Provider 管理接口暴露到局域网；只有在明确需要远程访问并已配置网络访问控制时，才应通过 `HOST` 改为其他监听地址。
 
 页面右上角的 `AI Settings` 可管理 API 与模型库：新增多个 OpenAI-compatible API、为每个 API 保存多个模型，并切换当前使用的 Provider / Model。切换立即作用于后续模型调用，进行中的请求继续使用它开始时的 Provider。Codex Local 作为内置配置保留。
+
+Conversation 标题区的 `Interaction mode` 可切换到实验性的 `ChatGPT Manual Bridge`。在该模式下，发送和应用回复都不会调用已配置的 Provider；把 ChatGPT 的完整回答粘贴回 Bridge 卡片并通过本地校验后，Workflow 才会原子更新 Product State、Decision、Open Question、Stage 状态与会话记录。ChatGPT Memory 可用于用户偏好、工作习惯和跨项目经验，但 Prompt 明确规定当前 Project State 是项目业务事实的唯一可信来源。
+
+Decision Memory 默认不在主对话后自动调用模型。需要补充整理历史对话中的隐含决策时，展开右侧 `Decision Memory` 并点击 `整理决策`；明确决策仍优先由正常 Stage Turn 的 `record_decision` 保存。
+
+V0 不持久化尚未应用的 Bridge Prompt 或粘贴草稿；刷新页面后需要从当前最新项目状态重新生成该回合。已成功应用的对话和结构化状态仍按原 Repository 正常持久化。
 
 如需运行浏览器 E2E，先以 `--remote-debugging-port=9223` 启动本机 Chrome，再执行：
 
@@ -209,6 +221,26 @@ curl -X POST http://localhost:3000/projects/<PROJECT_ID>/messages \
   -H 'content-type: application/json' \
   -d '{"content":"现在主播之间没有互动能力，希望增加互动，礼物流水是二级商业验证。"}'
 ```
+
+### ChatGPT Manual Bridge (Experimental)
+
+生成本轮手动 Prompt；该操作只读，不调用模型，也不保存用户消息：
+
+```bash
+curl -X POST http://localhost:3000/projects/<PROJECT_ID>/manual-bridge/prompt \
+  -H 'content-type: application/json' \
+  -d '{"kind":"USER_MESSAGE","content":"现在主播之间没有互动能力"}'
+```
+
+将返回的 `prompt` 复制到 ChatGPT。再把 ChatGPT 的完整返回连同生成接口返回的 Stage/版本元数据一起提交：
+
+```bash
+curl -X POST http://localhost:3000/projects/<PROJECT_ID>/manual-bridge/apply \
+  -H 'content-type: application/json' \
+  -d '{"stage":"DISCOVERY","kind":"USER_MESSAGE","expectedRevision":0,"expectedRecordVersion":0,"turnToken":"<生成接口返回的 turnToken>","userMessage":"现在主播之间没有互动能力","response":"<完整 ChatGPT 返回>"}'
+```
+
+服务端会确定性提取 `AI_PRODUCT_WORKFLOW_UPDATE` 块，直接用现有 Turn Schema 和 Executor 校验执行；格式无效、Stage 已变化或任一版本过期时不保存任何内容。Product Solution 的初始回合使用 `{"kind":"SOLUTION_START"}` 生成 Prompt，并同样在成功应用返回时才启动 Stage。
 
 ### Inspect State
 

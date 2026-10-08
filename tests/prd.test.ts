@@ -98,6 +98,8 @@ test("PRD generation uses exactly two model calls and saves a reproducible draft
   assert.equal(result.artifact.sourceVersions?.solution, 5);
   assert.equal(result.artifact.sourceVersions?.productSpecRevision, 0);
   assert.equal(result.artifact.sourceVersions?.confirmedProductStateVersion, 1);
+  await assert.rejects(() => new PrdService(repo, ai).generate(created.id), /must be cleared/);
+  assert.equal(requests.length, 2);
   assert.ok(result.artifact.sourceVersions?.confirmedProductStateHash);
   assert.deepEqual(result.artifact.selectedPromptIds, ["prd.base", "prd.capability.live"]);
   assert.ok(result.artifact.totalPromptHash);

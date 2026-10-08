@@ -7,6 +7,7 @@ import { PrdService } from "../src/prd/prd-service.js";
 import { InMemoryProjectRepository } from "../src/repositories/in-memory-project-repository.js";
 import { projectRoutes } from "../src/routes/projects.js";
 import { RuntimeService } from "../src/runtime/runtime-service.js";
+import { RequestProgressStore } from "../src/runtime/request-progress.js";
 
 test("PRD artifact API enforces confirmed sources and exposes generate, edit, and confirm", async () => {
   const app = Fastify();
@@ -40,7 +41,8 @@ test("PRD artifact API enforces confirmed sources and exposes generate, edit, an
   };
   const runtime = new RuntimeService(repo, ai);
   const prd = new PrdService(repo, ai);
-  await app.register(projectRoutes, { repo, runtime, prd });
+  const requestProgress = new RequestProgressStore();
+  await app.register(projectRoutes, { repo, runtime, prd, requestProgress });
 
   try {
     const unconfirmed = await repo.create(createProjectRecord("Unconfirmed", "普通功能"));
@@ -54,9 +56,15 @@ test("PRD artifact API enforces confirmed sources and exposes generate, edit, an
     project.workflow.stages.SOLUTION.confirmedVersion = 0;
     const confirmed = await repo.create(project);
 
-    const generated = await app.inject({ method: "POST", url: `/projects/${confirmed.id}/artifacts/prd/generate` });
+    const generated = await app.inject({
+      method: "POST",
+      url: `/projects/${confirmed.id}/artifacts/prd/generate`,
+      headers: { "x-request-id": "prd-progress" }
+    });
     assert.equal(generated.statusCode, 200);
     assert.equal(generated.json().artifact.reviewStatus, "DRAFT");
+    const progress = await app.inject({ method: "GET", url: "/requests/prd-progress" });
+    assert.equal(progress.json().phase, "COMPLETED");
 
     const edited = await app.inject({
       method: "PATCH",

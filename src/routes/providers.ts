@@ -28,6 +28,14 @@ export async function providerRoutes(app: FastifyInstance, deps: { library: Prov
 
   app.get("/api/providers", async () => deps.library.getState());
 
+  app.post("/api/providers/decision-extraction", async request => {
+    const input = z.object({
+      profileId: z.string().trim().min(1),
+      model: z.string().trim().min(1).max(200)
+    }).parse(request.body);
+    return deps.library.configureDecisionExtraction(input.profileId, input.model);
+  });
+
   app.post("/api/providers", async (request, reply) => {
     const input = createProfileSchema.parse(request.body);
     return reply.code(201).send(deps.library.createApiProfile(input));

@@ -10,6 +10,9 @@ import { PrdService } from "./prd/prd-service.js";
 import { FigmaPromptService } from "./figma/figma-prompt-service.js";
 import { InteractionService } from "./interaction/interaction-service.js";
 import { RequestProgressStore } from "./runtime/request-progress.js";
+import { ManualBridgeService } from "./runtime/manual-bridge-service.js";
+import { DecisionMemoryService } from "./decisions/decision-memory-service.js";
+import type { AIProvider } from "./ai/provider.js";
 
 const app = Fastify({ logger: true });
 const repo = new FileProjectRepository();
@@ -21,6 +24,9 @@ const runtime = new RuntimeService(repo, ai, requestProgress);
 const prd = new PrdService(repo, ai);
 const interaction = new InteractionService(repo, ai);
 const figmaPrompt = new FigmaPromptService(repo, ai);
+const manualBridge = new ManualBridgeService(repo);
+const decisionAI: AIProvider = { generate: request => providerSelection.library.generateDecision(request) };
+const decisionMemory = new DecisionMemoryService(repo, decisionAI);
 
 app.get("/health", async () => {
   const active = providerSelection.library.getState().active;
@@ -36,7 +42,7 @@ app.get("/health", async () => {
 });
 await app.register(workspaceRoutes);
 await app.register(providerRoutes, { library: providerSelection.library });
-await app.register(projectRoutes, { repo, runtime, prd, interaction, figmaPrompt, requestProgress });
+await app.register(projectRoutes, { repo, runtime, prd, interaction, figmaPrompt, requestProgress, manualBridge, decisionMemory });
 
 const port = Number(process.env.PORT ?? 3000);
 const host = process.env.HOST?.trim() || "127.0.0.1";

@@ -28,6 +28,8 @@ interface ContextBuildOptions {
   input?: unknown[];
   toolNames?: string[];
   inputTokenBudget?: number;
+  completionInstructions?: string;
+  omitInitialRequirement?: boolean;
 }
 
 export function buildStageContext(
@@ -39,7 +41,7 @@ export function buildStageContext(
   const input = options.input ?? [];
   const toolNames = options.toolNames ?? config.modelTools;
   const selectedTools = modelTools.filter(tool => toolNames.includes(tool.name));
-  const productSpec = projectStageProductSpec(project, stage);
+  const productSpec = projectStageProductSpec(project, stage, options.omitInitialRequirement);
   const historyCandidates = conversationCandidates(project, stage);
   const inputTokenBudget = stage === "DISCOVERY"
     ? options.inputTokenBudget ?? DISCOVERY_CONTEXT_INPUT_BUDGET_TOKENS
@@ -55,7 +57,7 @@ export function buildStageContext(
       },
       recentConversation: candidate.messages
     };
-    const instructions = renderInstructions(stage, projection);
+    const instructions = renderInstructions(stage, projection, options.completionInstructions);
     const estimatedInputTokens = estimateRequestInputTokens(instructions, input, selectedTools);
     if (inputTokenBudget === null || estimatedInputTokens <= inputTokenBudget) {
       return {
@@ -78,7 +80,7 @@ export function buildStageContext(
     },
     recentConversation: withoutHistory.messages
   };
-  const instructions = renderInstructions(stage, projection);
+  const instructions = renderInstructions(stage, projection, options.completionInstructions);
   const estimatedInputTokens = estimateRequestInputTokens(instructions, input, selectedTools);
   throw new Error(
     `Discovery context exceeds estimated input token budget of ${inputTokenBudget} after removing conversation history (estimated ${estimatedInputTokens})`
@@ -103,7 +105,11 @@ export function estimateTokens(value: string): number {
   return Math.max(0, cjk + Math.ceil(remaining / 4));
 }
 
-function projectStageProductSpec(project: ProjectRecord, stage: ReasoningStage): Record<string, unknown> {
+function projectStageProductSpec(
+  project: ProjectRecord,
+  stage: ReasoningStage,
+  omitInitialRequirement = false
+): Record<string, unknown> {
   const config = stageRegistry[stage];
   const spec = project.productSpec;
   const selected: Record<string, unknown> = {};
@@ -121,6 +127,9 @@ function projectStageProductSpec(project: ProjectRecord, stage: ReasoningStage):
         : spec.decisions.filter(decision =>
             decision.status === "ACTIVE" && (decision.stage === stage || (stage === "SOLUTION" && decision.stage === "DISCOVERY"))
           );
+    } else if (root === "project" && omitInitialRequirement) {
+      const { initialRequirement: _initialRequirement, ...projectContext } = spec.project;
+      selected[root] = projectContext;
     } else {
       selected[root] = spec[root as keyof typeof spec];
     }
@@ -162,11 +171,12 @@ function lastCompleteLocalTurn(
   return messages.slice(startIndex, lastAssistantIndex + 1);
 }
 
-function renderInstructions(stage: ReasoningStage, projection: StageContextProjection): string {
+function renderInstructions(stage: ReasoningStage, projection: StageContextProjection, completionInstructions?: string): string {
   const config = stageRegistry[stage];
-  return `${config.prompt}\n\n# CURRENT STRUCTURED CONTEXT\n${JSON.stringify(
+  const context = `${config.prompt}\n\n# CURRENT STRUCTURED CONTEXT\n${JSON.stringify(
     projection,
     null,
     2
-  )}\n\n# OUTPUT EFFICIENCY\nThe structured context is canonical. Never rewrite an unchanged field merely to restate the solution. Emit only operations required by new user information, consolidate related field changes into the fewest update_product_spec operations, and keep assistantResponse concise. Target a complete function call under 3,500 output tokens.\n\nReturn exactly one ${config.modelTools[0]} call. Include the complete assistantResponse, all state operations in execution order, and the Ready evaluation in that call. The server executes the batch atomically and makes the final Ready decision. Do not wait for tool results or claim that the server marked the stage Ready.`;
+  )}`;
+  return completionInstructions?.trim() ? `${context}\n\n${completionInstructions.trim()}` : context;
 }

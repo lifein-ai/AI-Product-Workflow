@@ -1,8 +1,17 @@
+import { DISCOVERY_CRITERION_IDS, DISCOVERY_TOOL_NAME } from "../workflow/stage-registry.js";
+import { decisionExtractionTool } from "../decisions/schemas.js";
+
+const updateProductSpecBaseDescription = "Apply small, explicit mutations to current stage-owned Product Spec fields. Paths may be stage-relative or start with the owned root, and may use dots or slashes. ADD to an existing array accepts one item or an array. If an optional object or string is absent, REPLACE the whole field. Use only sufficiently established facts or clearly labeled assumptions.";
+const discoveryProductSpecShapes = "Discovery shapes: users item={id,name,description?}; scenarios item={id,actorId,trigger?,context,goal,currentProblem?}; constraints item={id,type,description}, where type MUST be exactly BUSINESS, TECHNICAL, RESOURCE, VERSION, COMPLIANCE, or OTHER; hypotheses item={id,statement,rationale?}; problem={statement,impact?:string[]}; direction={summary,rationale:string[]}; behaviorChange basis is either {type:'EVIDENCED_FRICTION',friction,evidence:string[]} or {type:'ACCEPTED_ASSUMPTION',assumption,evidenceStatus:'LIMITED'|'UNVALIDATED',decisionId,validationIntent}; evidence MUST remain an array even when there is one item.";
+const solutionProductSpecShapes = "Solution shapes: keyMechanisms item={id,name,description}; keyRules item={id,rule,rationale?}; mainProductFlow item={id,step,actor?,outcome?}; tradeOffs item={id,topic,decision,rationale,alternatives?:string[]}; risks item={id,risk,mitigation?}; assumptions item={id,assumption,validationIntent?}; scope.inScope and scope.outOfScope are string arrays.";
+const discoveryUpdateProductSpecDescription = `${updateProductSpecBaseDescription} ${discoveryProductSpecShapes}`;
+const solutionUpdateProductSpecDescription = `${updateProductSpecBaseDescription} ${solutionProductSpecShapes}`;
+
 const atomicModelTools = [
   {
     type: "function",
     name: "update_product_spec",
-    description: "Apply small, explicit mutations to current stage-owned Product Spec fields. Paths may be stage-relative or start with the owned root, and may use dots or slashes. ADD to an existing array accepts one item or an array. Discovery shapes: users item={id,name,description?}; scenarios item={id,actorId,trigger?,context,goal,currentProblem?}; constraints item={id,type,description}, where type MUST be exactly BUSINESS, TECHNICAL, RESOURCE, VERSION, COMPLIANCE, or OTHER; hypotheses item={id,statement,rationale?}; problem={statement,impact?:string[]}; direction={summary,rationale:string[]}; behaviorChange EVIDENCED_FRICTION basis={type:'EVIDENCED_FRICTION',friction,evidence:string[]} and evidence MUST remain an array even when there is one item. Solution shapes: keyMechanisms item={id,name,description}; keyRules item={id,rule,rationale?}; mainProductFlow item={id,step,actor?,outcome?}; tradeOffs item={id,topic,decision,rationale,alternatives?:string[]}; risks item={id,risk,mitigation?}; assumptions item={id,assumption,validationIntent?}; scope.inScope and scope.outOfScope are string arrays. If an optional object or string is absent, REPLACE the whole field. Use only sufficiently established facts or clearly labeled assumptions.",
+    description: `${updateProductSpecBaseDescription} ${discoveryProductSpecShapes} ${solutionProductSpecShapes}`,
     strict: false,
     parameters: {
       type: "object",
@@ -109,7 +118,7 @@ const atomicModelTools = [
             additionalProperties: false,
             required: ["criterionId", "status", "reason"],
             properties: {
-              criterionId: { type: "string", enum: ["problem_clarity", "user_clarity", "scenario_clarity", "goal_clarity", "behavior_change_basis", "current_product_clarity", "direction_clarity", "scope_clarity", "constraint_clarity", "evidence_sufficiency"] },
+              criterionId: { type: "string", enum: DISCOVERY_CRITERION_IDS },
               status: { type: "string", enum: ["SUFFICIENT", "PARTIAL", "MISSING", "NOT_APPLICABLE"] },
               reason: { type: "string" }
             }
@@ -122,7 +131,7 @@ const atomicModelTools = [
   }
 ];
 
-function withoutExpectedRevision(toolName: string) {
+function withoutExpectedRevision(toolName: string, description?: string) {
   const tool = atomicModelTools.find(item => item.name === toolName)!;
   const { expectedRevision: _expectedRevision, ...properties } = tool.parameters.properties;
   const operationProperties: Record<string, unknown> = {
@@ -138,7 +147,7 @@ function withoutExpectedRevision(toolName: string) {
   }
   return {
     type: "object",
-    description: tool.description,
+    description: description ?? tool.description,
     additionalProperties: false,
     required: ["kind", ...tool.parameters.required.filter(name => name !== "expectedRevision")],
     properties: operationProperties
@@ -147,7 +156,7 @@ function withoutExpectedRevision(toolName: string) {
 
 const evaluateStageTool = atomicModelTools.find(item => item.name === "evaluate_stage")!;
 
-function completeTurnTool(name: string, stage: string, criteriaIds: string[]) {
+function completeTurnTool(name: string, stage: string, criteriaIds: readonly string[], updateProductSpecDescription: string) {
   return {
   type: "function",
   name,
@@ -169,7 +178,7 @@ function completeTurnTool(name: string, stage: string, criteriaIds: string[]) {
         description: "All deterministic state changes for this turn, in execution order. Record a referenced decision before using $decision:<reference> in a later Product Spec update.",
         items: {
           anyOf: [
-            withoutExpectedRevision("update_product_spec"),
+            withoutExpectedRevision("update_product_spec", updateProductSpecDescription),
             withoutExpectedRevision("manage_open_question"),
             withoutExpectedRevision("record_decision"),
             withoutExpectedRevision("request_validation")
@@ -204,14 +213,16 @@ function completeTurnTool(name: string, stage: string, criteriaIds: string[]) {
   };
 }
 
-const completeDiscoveryTurnTool = completeTurnTool("complete_discovery_turn", "Discovery", [
-  "problem_clarity", "user_clarity", "scenario_clarity", "goal_clarity", "behavior_change_basis",
-  "current_product_clarity", "direction_clarity", "scope_clarity", "constraint_clarity", "evidence_sufficiency"
-]);
+const completeDiscoveryTurnTool = completeTurnTool(
+  DISCOVERY_TOOL_NAME,
+  "Discovery",
+  DISCOVERY_CRITERION_IDS,
+  discoveryUpdateProductSpecDescription
+);
 const completeSolutionTurnTool = completeTurnTool("complete_solution_turn", "Product Solution", [
   "solution_summary", "core_solution", "key_mechanisms", "scope_clarity", "key_rules",
   "main_product_flow", "tradeoff_clarity", "handoff_readiness"
-]);
+], solutionUpdateProductSpecDescription);
 
 const completePrdMetaAnalysisTool = {
   type: "function",
@@ -394,5 +405,6 @@ export const modelTools = [
   completePrdMetaAnalysisTool,
   completePrdGenerationTool,
   completeInteractionGenerationTool,
-  completeFigmaMetaAnalysisTool
+  completeFigmaMetaAnalysisTool,
+  decisionExtractionTool
 ];

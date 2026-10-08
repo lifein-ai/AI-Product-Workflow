@@ -1,6 +1,6 @@
 import { performance } from "node:perf_hooks";
 import type { AIProvider, AIProviderProgress, ModelResponse } from "../ai/provider.js";
-import type { Decision, ProjectRecord } from "../domain/types.js";
+import type { Decision, ProjectRecord, ReasoningStage } from "../domain/types.js";
 import type { RequestPhase } from "./request-progress.js";
 import {
   measureLatencyStep,
@@ -42,13 +42,21 @@ export async function runToolLoop(
   const baseRevision = project.productSpec.version.revision;
   const toolNames = stageRegistry[stage].modelTools;
   const expectedTurnTool = toolNames[0];
+  const omitInitialRequirement = stage === "DISCOVERY"
+    && !project.messages.some(message => (message.stage ?? "DISCOVERY") === "DISCOVERY")
+    && userMessage === project.productSpec.project.initialRequirement;
   let purpose = `${stage.toLowerCase()}_turn`;
 
   for (let callIndex = 1; callIndex <= MAX_LLM_CALLS_PER_TURN; callIndex++) {
     if (callIndex > 1) {
       progress?.onPhase?.("REPAIRING_RESPONSE", "The provider returned output, but it failed local workflow validation. Requesting one bounded repair.");
     }
-    const context = measureLatencyStepSync("build_context", () => buildStageContext(project, stage, { input, toolNames }), { callIndex });
+    const context = measureLatencyStepSync("build_context", () => buildStageContext(project, stage, {
+      input,
+      toolNames,
+      omitInitialRequirement,
+      completionInstructions: providerCompletionInstructions(stage, expectedTurnTool)
+    }), { callIndex });
     const instructions = context.instructions;
     recordContextSnapshot(project, stage, callIndex, instructions, input, toolNames, context.projection);
     const response = await callModel(ai, { instructions, input, toolNames }, {
@@ -100,6 +108,21 @@ export async function runToolLoop(
   }
 
   throw new Error(`${stage} turn did not produce a valid result`);
+}
+
+function providerCompletionInstructions(stage: ReasoningStage, toolName: string): string {
+  const efficiency = "The structured context is canonical. Never rewrite an unchanged field merely to restate it. Emit only changes required by new user information, consolidate related field changes, and keep the user-facing response concise. Target a complete response under 3,500 output tokens.";
+  if (stage !== "DISCOVERY") {
+    return `# COMPLETION PROTOCOL\n${efficiency}\nReturn exactly one ${toolName} call. Include the complete assistantResponse, all state operations in execution order, and the Ready evaluation in that call. The server executes the batch atomically and makes the final Ready decision. Do not wait for tool results or claim that the server marked the stage Ready.`;
+  }
+  return `# COMPLETION PROTOCOL
+${efficiency}
+Return exactly one ${toolName} call for this turn, containing assistantResponse, all operations in execution order, and a complete readyEvaluation.
+- Put Product Spec changes in update_product_spec.
+- Put key unknown lifecycle changes in manage_open_question.
+- Put explicit product decisions in record_decision. To reference a new Decision in the same turn, give it a reference first and use $decision:<reference> in the later Product Spec value.
+- Put external fact requests in request_validation.
+The server validates and executes the batch atomically and makes the final Ready decision. Do not wait for tool results or claim that persistence succeeded or the stage became Ready.`;
 }
 
 function selectTurnPayload(response: ModelResponse, expectedTurnTool: string): { payload: string; warnings: string[] } {

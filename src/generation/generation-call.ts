@@ -6,13 +6,15 @@ interface GenerationCallOptions<T> {
   input: unknown[];
   toolName: string;
   parse: (value: unknown) => T;
+  maxRetries?: number;
 }
 
 export async function runGenerationCallWithRepair<T>(options: GenerationCallOptions<T>): Promise<T> {
   const first = await options.ai.generate({
     instructions: options.instructions,
     input: options.input,
-    toolNames: [options.toolName]
+    toolNames: [options.toolName],
+    maxRetries: options.maxRetries
   });
   try {
     return parseGenerationResponse(first, options.toolName, options.parse);
@@ -36,7 +38,8 @@ export async function runGenerationCallWithRepair<T>(options: GenerationCallOpti
     const repaired = await options.ai.generate({
       instructions: options.instructions,
       input: repairInput,
-      toolNames: [options.toolName]
+      toolNames: [options.toolName],
+      maxRetries: options.maxRetries
     });
     try {
       return parseGenerationResponse(repaired, options.toolName, options.parse);

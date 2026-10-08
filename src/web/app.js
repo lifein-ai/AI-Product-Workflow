@@ -1,4 +1,6 @@
 import { createSubmissionGuard } from "/submission-guard.js";
+import { createProjectDeletionController } from "/project-deletion.js";
+import { createRequestHeaders } from "/http-client.js";
 
 const submissionGuard = createSubmissionGuard({
   log(event, detail) {
@@ -8,8 +10,13 @@ const submissionGuard = createSubmissionGuard({
 
 const ui = Object.fromEntries([
   "workspace-title", "conversation-title", "spec-title", "readiness-title", "decisions-title",
+  "workflow-progress", "stage-step-discovery", "stage-step-solution", "stage-step-prd", "stage-step-interaction", "stage-step-figma",
+  "interaction-mode", "manual-bridge-panel", "manual-bridge-title", "manual-bridge-step",
+  "manual-bridge-prompt", "copy-manual-bridge-prompt", "manual-bridge-copy-status",
+  "manual-bridge-response", "cancel-manual-bridge", "apply-manual-bridge",
   "provider-summary", "provider-settings-button", "provider-dialog", "provider-dialog-close",
   "provider-library-error", "provider-current-name", "provider-current-model", "provider-profile-list",
+  "decision-provider-profile", "decision-provider-model", "save-decision-provider",
   "provider-form", "provider-form-title", "provider-form-cancel", "provider-edit-id", "provider-name-input",
   "provider-base-url-input", "provider-api-key-input", "provider-models-input", "provider-default-model-input",
   "provider-save-button",
@@ -20,6 +27,7 @@ const ui = Object.fromEntries([
   "error-title", "retry-button", "refresh-button", "confirmation-panel", "confirmation-title", "confirmation-description",
   "confirm-button", "confirmed-panel", "confirmed-title", "confirmed-description", "start-solution-button",
   "generate-prd-button", "continue-interaction-button", "prd-panel", "prd-status", "prd-blocking",
+  "reopen-stage-button", "reopen-discovery-button", "copy-prd-button", "copy-interaction-button",
   "prd-clarification-wrap", "prd-clarification-answer", "submit-prd-clarification-button", "return-to-solution-button",
   "prd-content", "prd-source", "save-prd-button", "confirm-prd-button", "message-form", "message-input-label",
   "interaction-panel", "interaction-status", "interaction-blocking", "interaction-clarification-wrap",
@@ -30,6 +38,7 @@ const ui = Object.fromEntries([
   "copy-figma-prompt-button", "confirm-figma-prompt-button",
   "message-input", "send-button", "spec-revision", "readiness-status", "readiness-reasons", "spec-content",
   "blocking-count", "blocking-questions", "nonblocking-count", "nonblocking-questions", "active-decisions",
+  "decision-search", "scan-decisions-button", "decision-scan-status", "deferred-decisions-wrap", "deferred-count", "deferred-decisions",
   "superseded-decisions-wrap", "superseded-count", "superseded-decisions", "project-storage-section",
   "storage-kind", "manage-project-name", "rename-project-button", "project-record-detail", "export-project-button",
   "prd-file-detail", "clear-prd-button", "interaction-file-detail", "clear-interaction-button",
@@ -51,8 +60,16 @@ const state = {
   requestProgress: null,
   providerLibrary: null,
   providerBusy: false,
+  interactionMode: window.localStorage.getItem("workflowInteractionMode") === "manual" ? "manual" : "provider",
+  manualBridgeTurn: null,
+  manualBridgeResponse: "",
+  dirtyArtifacts: new Set(),
   notice: ""
 };
+
+function isManualBridgeMode() {
+  return state.interactionMode === "manual";
+}
 
 class ApiError extends Error {
   constructor(message, status) {
@@ -66,7 +83,7 @@ async function api(path, options = {}) {
   try {
     response = await fetch(path, {
       ...options,
-      headers: { "content-type": "application/json", ...(options.headers || {}) }
+      headers: createRequestHeaders(options)
     });
   } catch (error) {
     throw new Error("无法连接服务器。请先刷新服务器状态，确认消息是否已保存，再决定是否重新发送。", { cause: error });
@@ -84,10 +101,14 @@ function friendlyError(message, status) {
   if (status === 502 && /validation/i.test(message)) return "AI 返回结果连续两次未通过工作流校验，本轮没有保存。可以安全重试；若持续出现请检查 Runtime 日志。";
   if (status === 502 && /output token limit/i.test(message)) return "AI 输出超过当前长度限制，本轮没有保存。请提高服务端输出上限后安全重试。";
   if (status === 502 && /compatibility/i.test(message)) return "ModelFlare 暂时无法接受本次请求，本轮没有保存。可以安全重试。";
-  if (status === 502) return "无法连接 ModelFlare，本轮没有保存。请检查网络或服务状态后安全重试。";
-  if (status === 503) return "Discovery AI 当前不可用，请检查服务端 ModelFlare 配置后重试。";
+  if (status === 502) return `无法连接 ${activeProviderName()}，本轮没有保存。请检查网络或服务状态后安全重试。`;
+  if (status === 503) return `${activeProviderName()} 当前不可用，请检查 AI Settings 后重试。`;
   if (status === 409) return `服务器状态已变化：${message}。请刷新后继续。`;
   return message;
+}
+
+function activeProviderName() {
+  return state.providerLibrary?.active?.name || "AI Provider";
 }
 
 function setBusy(busy, title = "Discovery is working") {
@@ -98,15 +119,19 @@ function setBusy(busy, title = "Discovery is working") {
   ui["send-button"].disabled = busy;
   ui["confirm-button"].disabled = busy;
   ui["start-solution-button"].disabled = busy;
+  ui["reopen-stage-button"].disabled = busy;
+  ui["reopen-discovery-button"].disabled = busy;
   ui["generate-prd-button"].disabled = busy;
   ui["submit-prd-clarification-button"].disabled = busy;
   ui["return-to-solution-button"].disabled = busy;
   ui["prd-clarification-answer"].disabled = busy;
   ui["save-prd-button"].disabled = busy;
+  ui["copy-prd-button"].disabled = busy;
   ui["confirm-prd-button"].disabled = busy;
   ui["prd-content"].disabled = busy;
   ui["generate-interaction-button"].disabled = busy;
   ui["save-interaction-button"].disabled = busy;
+  ui["copy-interaction-button"].disabled = busy;
   ui["confirm-interaction-button"].disabled = busy;
   ui["submit-interaction-clarification-button"].disabled = busy;
   ui["interaction-clarification-answer"].disabled = busy;
@@ -120,12 +145,18 @@ function setBusy(busy, title = "Discovery is working") {
   ui["new-project-button"].disabled = busy;
   ui["reload-projects-button"].disabled = busy;
   ui["provider-settings-button"].disabled = busy;
+  ui["interaction-mode"].disabled = busy || Boolean(state.manualBridgeTurn);
+  ui["copy-manual-bridge-prompt"].disabled = busy;
+  ui["manual-bridge-response"].disabled = busy;
+  ui["cancel-manual-bridge"].disabled = busy;
+  ui["apply-manual-bridge"].disabled = busy;
   ui["rename-project-button"].disabled = busy;
   ui["export-project-button"].disabled = busy;
   ui["clear-prd-button"].disabled = busy;
   ui["clear-interaction-button"].disabled = busy;
   ui["clear-figma-button"].disabled = busy;
   ui["cleanup-artifacts-button"].disabled = busy;
+  ui["scan-decisions-button"].disabled = busy || !state.project;
   ui["delete-project-button"].disabled = busy;
   for (const button of document.querySelectorAll(".project-card-actions button")) button.disabled = busy;
   ui["message-input"].disabled = busy || stageStatus() === "CONFIRMED";
@@ -144,7 +175,7 @@ function updateElapsed() {
   const expectation = state.requestProgress?.detail || (seconds < 30
     ? "Preparing context and reviewing the requirement."
     : seconds < 60
-      ? "ModelFlare is still working. This response time is expected."
+      ? `${activeProviderName()} is still working. This response time is expected.`
       : "Still working — tool calling can take several minutes. You can keep this page open.");
   ui["activity-detail"].textContent = `${expectation} ${seconds}s elapsed.`;
 }
@@ -202,6 +233,10 @@ function displayStatus() {
 
 function render() {
   const hasProject = Boolean(state.project);
+  ui["interaction-mode"].value = state.interactionMode;
+  ui["interaction-mode"].disabled = state.busy || Boolean(state.manualBridgeTurn);
+  ui["scan-decisions-button"].disabled = state.busy || !hasProject;
+  ui["workflow-progress"].hidden = !hasProject;
   ui["create-view"].hidden = hasProject;
   ui["conversation-view"].hidden = !hasProject;
   ui["project-name"].textContent = hasProject ? state.project.productSpec.project.name : "";
@@ -214,12 +249,14 @@ function render() {
   ui["conversation-title"].textContent = `${currentName} Conversation`;
   ui["spec-title"].textContent = activeStage() === "SOLUTION" ? "Current Product Solution" : "Live Product Spec";
   ui["readiness-title"].textContent = `${currentName} Status`;
-  ui["decisions-title"].textContent = `${currentName} Decisions`;
+  ui["decisions-title"].textContent = "Decision Memory";
   ui["message-input-label"].textContent = activeStage() === "SOLUTION" ? "Discuss or refine the solution" : "Your answer";
+  ui["send-button"].textContent = isManualBridgeMode() ? "Create ChatGPT Prompt" : "Send Answer";
   ui["error-title"].textContent = `${currentName} request failed`;
 
   renderProjectHistory();
   renderProjectStorage();
+  renderWorkflowProgress();
 
   renderReadiness();
   renderSpec();
@@ -231,22 +268,57 @@ function render() {
   ui["initial-requirement-card"].dataset.label = activeStage() === "SOLUTION" ? "Confirmed Discovery Handoff" : "Initial Requirement";
   ui["initial-requirement-card"].textContent = handoff;
   renderMessages();
+  renderManualBridge();
   ui["revision-notice"].hidden = !state.notice;
   ui["revision-notice"].textContent = state.notice;
   ui["confirmation-panel"].hidden = stageStatus() !== "READY_FOR_CONFIRMATION";
   ui["confirmation-title"].textContent = `${currentName} is sufficient to proceed.`;
   ui["confirmation-description"].textContent = `The AI has prepared the ${currentName}. Only you can confirm it.`;
   ui["confirm-button"].textContent = `Confirm ${currentName}`;
+  ui["confirm-button"].disabled = state.busy || Boolean(state.manualBridgeTurn);
   ui["confirmed-panel"].hidden = stageStatus() !== "CONFIRMED";
   ui["confirmed-title"].textContent = `${activeStage()}_CONFIRMED`;
   ui["confirmed-description"].textContent = `${currentName} is frozen at the confirmed content version.`;
   ui["start-solution-button"].hidden = !(activeStage() === "DISCOVERY" && stageStatus() === "CONFIRMED" && state.project.workflow.stages.SOLUTION.status === "NOT_STARTED");
+  ui["start-solution-button"].disabled = state.busy || Boolean(state.manualBridgeTurn);
+  ui["reopen-stage-button"].hidden = stageStatus() !== "CONFIRMED";
+  ui["reopen-stage-button"].textContent = `Reopen ${currentName}`;
+  ui["reopen-discovery-button"].hidden = !(activeStage() === "SOLUTION" && state.project.workflow.stages.DISCOVERY.status === "CONFIRMED");
   renderPrdArtifact();
   renderInteractionArtifact();
   renderFigmaPromptArtifact();
-  ui["message-form"].hidden = stageStatus() === "CONFIRMED";
-  ui["message-input"].disabled = state.busy || stageStatus() === "CONFIRMED";
+  ui["message-form"].hidden = stageStatus() === "CONFIRMED" || Boolean(state.manualBridgeTurn);
+  ui["message-input"].disabled = state.busy || stageStatus() === "CONFIRMED" || Boolean(state.manualBridgeTurn);
   ui["message-input"].placeholder = activeStage() === "SOLUTION" ? "修改、否定或补充当前 Product Solution…" : "Answer the current Discovery question…";
+}
+
+function renderWorkflowProgress() {
+  if (!state.project) return;
+  const steps = [
+    ["stage-step-discovery", state.project.workflow.stages.DISCOVERY.status],
+    ["stage-step-solution", state.project.workflow.stages.SOLUTION.status],
+    ["stage-step-prd", state.project.artifacts.prd.reviewStatus],
+    ["stage-step-interaction", state.project.artifacts.interaction.reviewStatus],
+    ["stage-step-figma", state.project.artifacts.figmaPrompt.reviewStatus]
+  ];
+  for (const [id, status] of steps) {
+    ui[id].className = status === "CONFIRMED" ? "complete" : ["IN_PROGRESS", "READY_FOR_CONFIRMATION", "DRAFT", "BLOCKED"].includes(status) ? "current" : "";
+  }
+}
+
+function renderManualBridge() {
+  const turn = state.manualBridgeTurn;
+  ui["manual-bridge-panel"].hidden = !turn;
+  if (!turn) return;
+  ui["manual-bridge-title"].textContent = turn.kind === "SOLUTION_START"
+    ? "Start Product Solution in ChatGPT"
+    : `Continue this ${stageName()} turn in ChatGPT`;
+  ui["manual-bridge-step"].textContent = state.manualBridgeResponse.trim() ? "2 · Apply response" : "1 · Copy prompt";
+  ui["manual-bridge-prompt"].value = turn.prompt;
+  if (ui["manual-bridge-response"].value !== state.manualBridgeResponse) {
+    ui["manual-bridge-response"].value = state.manualBridgeResponse;
+  }
+  ui["apply-manual-bridge"].disabled = state.busy || !state.manualBridgeResponse.trim();
 }
 
 function renderProjectHistory() {
@@ -311,7 +383,7 @@ function formatBytes(bytes) {
 
 async function loadProjectHistory() {
   const result = await api("/projects");
-  state.projects = result.projects || [];
+  state.projects = projectDeletion.excludeDeletedProjects(result.projects || []);
   renderProjectHistory();
   renderProjectStorage();
 }
@@ -320,7 +392,11 @@ async function openProject(projectId) {
   if (state.busy) return;
   clearError();
   try {
-    state.project = await api(`/projects/${encodeURIComponent(projectId)}`);
+    const project = await api(`/projects/${encodeURIComponent(projectId)}`);
+    if (projectDeletion.wasDeleted(projectId)) return;
+    clearManualBridgeTurn();
+    state.dirtyArtifacts.clear();
+    state.project = project;
     window.localStorage.setItem("discoveryProjectId", state.project.id);
     window.history.replaceState(null, "", `/?project=${encodeURIComponent(state.project.id)}`);
     state.notice = "Saved project restored from local storage.";
@@ -349,18 +425,11 @@ async function renameSavedProject(project) {
 
 async function deleteSavedProject(project) {
   if (state.busy) return;
-  if (!window.confirm(`Delete “${project.name}” and its generated artifacts from local storage? Export first if you need a backup.`)) return;
-  setBusy(true, "Deleting project");
   try {
-    await api(`/projects/${encodeURIComponent(project.id)}`, { method: "DELETE" });
-    if (window.localStorage.getItem("discoveryProjectId") === project.id) {
-      window.localStorage.removeItem("discoveryProjectId");
-    }
-    await loadProjectHistory();
+    await projectDeletion.deleteProject(project);
   } catch (error) {
     showError(error);
   } finally {
-    setBusy(false);
     render();
   }
 }
@@ -372,16 +441,17 @@ function renderPrdArtifact() {
   const canClarify = artifact?.lifecycleStatus === "NOT_GENERATED" && artifact?.reviewStatus === "BLOCKED" &&
     (artifact?.openQuestions || []).length > 0 && !(artifact?.openQuestions || []).some(question => question.scope === "PRODUCT_DECISION");
   ui["prd-panel"].hidden = !solutionConfirmed && !hasArtifactState;
-  ui["generate-prd-button"].hidden = !solutionConfirmed || canClarify;
-  ui["generate-prd-button"].textContent = artifact?.lifecycleStatus === "CURRENT" ? "Regenerate PRD" : "Generate PRD Requirement Details";
+  ui["generate-prd-button"].hidden = !solutionConfirmed || canClarify || artifact?.lifecycleStatus === "CURRENT";
+  ui["generate-prd-button"].textContent = "Generate PRD Requirement Details";
   ui["continue-interaction-button"].hidden = true;
   if (!artifact) return;
 
   ui["prd-status"].textContent = `${artifact.lifecycleStatus} · ${artifact.reviewStatus}`;
   ui["prd-status"].className = `status-badge ${artifact.reviewStatus === "CONFIRMED" ? "status-confirmed" : artifact.reviewStatus === "BLOCKED" || artifact.lifecycleStatus === "STALE" ? "status-ready" : ""}`;
-  ui["prd-content"].value = artifact.currentContent || artifact.generatedContent || "";
+  if (!state.dirtyArtifacts.has("prd")) ui["prd-content"].value = artifact.currentContent || artifact.generatedContent || "";
   ui["prd-content"].readOnly = artifact.lifecycleStatus !== "CURRENT";
   ui["save-prd-button"].hidden = artifact.lifecycleStatus !== "CURRENT";
+  ui["copy-prd-button"].hidden = !artifact.currentContent;
   ui["confirm-prd-button"].hidden = artifact.lifecycleStatus !== "CURRENT" || artifact.reviewStatus !== "DRAFT";
   const versions = artifact.sourceVersions;
   ui["prd-source"].textContent = versions ? `Source Discovery v${versions.discovery} · Solution v${versions.solution}` : "";
@@ -400,17 +470,17 @@ function renderInteractionArtifact() {
   const canClarify = artifact?.lifecycleStatus === "NOT_GENERATED" && artifact?.reviewStatus === "BLOCKED" &&
     (artifact?.openQuestions || []).length > 0 && !(artifact?.openQuestions || []).some(question => question.scope === "PRODUCT_DECISION");
   ui["interaction-panel"].hidden = !eligible && !hasArtifactState;
-  ui["continue-interaction-button"].hidden = !eligible || canClarify;
+  ui["continue-interaction-button"].hidden = true;
   ui["continue-interaction-button"].disabled = state.busy;
-  ui["continue-interaction-button"].textContent = artifact?.lifecycleStatus === "CURRENT" ? "Regenerate Interaction" : "Generate Interaction Specification";
   if (!artifact) return;
   ui["interaction-status"].textContent = `${artifact.lifecycleStatus} · ${artifact.reviewStatus}`;
   ui["interaction-status"].className = `status-badge ${artifact.reviewStatus === "CONFIRMED" ? "status-confirmed" : artifact.reviewStatus === "BLOCKED" || artifact.lifecycleStatus === "STALE" ? "status-ready" : ""}`;
-  ui["interaction-content"].value = artifact.currentContent || artifact.generatedContent || "";
+  if (!state.dirtyArtifacts.has("interaction")) ui["interaction-content"].value = artifact.currentContent || artifact.generatedContent || "";
   ui["interaction-content"].readOnly = artifact.lifecycleStatus !== "CURRENT";
-  ui["generate-interaction-button"].hidden = !eligible || canClarify;
-  ui["generate-interaction-button"].textContent = artifact.lifecycleStatus === "CURRENT" ? "Regenerate Interaction" : "Generate Interaction Specification";
+  ui["generate-interaction-button"].hidden = !eligible || canClarify || artifact.lifecycleStatus === "CURRENT";
+  ui["generate-interaction-button"].textContent = "Generate Interaction Specification";
   ui["save-interaction-button"].hidden = artifact.lifecycleStatus !== "CURRENT";
+  ui["copy-interaction-button"].hidden = !artifact.currentContent;
   ui["confirm-interaction-button"].hidden = artifact.lifecycleStatus !== "CURRENT" || artifact.reviewStatus !== "DRAFT";
   const versions = artifact.sourceVersions;
   ui["interaction-source"].textContent = versions ? `Product State v${versions.confirmedProductStateVersion} · PRD v${versions.prd}` : "";
@@ -430,10 +500,10 @@ function renderFigmaPromptArtifact() {
 
   ui["figma-prompt-status"].textContent = `${artifact.lifecycleStatus} · ${artifact.reviewStatus}`;
   ui["figma-prompt-status"].className = `status-badge ${artifact.reviewStatus === "CONFIRMED" ? "status-confirmed" : artifact.reviewStatus === "BLOCKED" || artifact.lifecycleStatus === "STALE" ? "status-ready" : ""}`;
-  ui["figma-prompt-content"].value = artifact.currentContent || artifact.generatedContent || "";
+  if (!state.dirtyArtifacts.has("figma")) ui["figma-prompt-content"].value = artifact.currentContent || artifact.generatedContent || "";
   ui["figma-prompt-content"].readOnly = artifact.lifecycleStatus !== "CURRENT";
-  ui["generate-figma-prompt-button"].hidden = !eligible;
-  ui["generate-figma-prompt-button"].textContent = artifact.lifecycleStatus === "CURRENT" ? "Reassemble Codex Figma Prompt" : "Assemble Codex Figma Prompt";
+  ui["generate-figma-prompt-button"].hidden = !eligible || artifact.lifecycleStatus === "CURRENT";
+  ui["generate-figma-prompt-button"].textContent = "Assemble Codex Figma Prompt";
   ui["save-figma-prompt-button"].hidden = artifact.lifecycleStatus !== "CURRENT";
   ui["copy-figma-prompt-button"].hidden = !artifact.currentContent;
   ui["confirm-figma-prompt-button"].hidden = artifact.lifecycleStatus !== "CURRENT" || artifact.reviewStatus !== "DRAFT";
@@ -626,15 +696,26 @@ function renderQuestionGroup(container, questions, blocking) {
 }
 
 function renderDecisions() {
-  const decisions = state.project?.productSpec?.decisions?.filter(decision =>
-    decision.stage === activeStage() || (activeStage() === "SOLUTION" && decision.stage === "DISCOVERY" && decision.status === "ACTIVE")
-  ) || [];
+  const query = ui["decision-search"].value.trim().toLocaleLowerCase();
+  const decisions = (state.project?.productSpec?.decisions || []).filter(decision => !query || decisionSearchText(decision).includes(query));
   const active = decisions.filter(decision => decision.status === "ACTIVE");
+  const deferred = decisions.filter(decision => decision.status === "DEFERRED");
   const superseded = decisions.filter(decision => decision.status === "SUPERSEDED");
   renderDecisionGroup(ui["active-decisions"], active, false);
+  renderDecisionGroup(ui["deferred-decisions"], deferred, false);
   renderDecisionGroup(ui["superseded-decisions"], superseded, true);
+  ui["deferred-count"].textContent = String(deferred.length);
+  ui["deferred-decisions-wrap"].hidden = deferred.length === 0;
   ui["superseded-count"].textContent = String(superseded.length);
   ui["superseded-decisions-wrap"].hidden = superseded.length === 0;
+  const memory = state.project?.decisionMemory;
+  ui["decision-scan-status"].textContent = memory?.status === "FAILED"
+    ? `Last scan failed · ${memory.lastError || "unknown error"}`
+    : memory?.status === "PENDING"
+      ? `${memory.pendingMessageCount || 0} messages pending`
+    : memory?.lastScannedAt
+      ? `Scanned ${formatDate(memory.lastScannedAt)}`
+      : "Not scanned yet";
 }
 
 function renderDecisionGroup(container, decisions, superseded) {
@@ -643,14 +724,67 @@ function renderDecisionGroup(container, decisions, superseded) {
     if (!superseded) container.append(emptyNode(`No ${stageName()} decisions recorded.`));
     return;
   }
-  for (const decision of decisions) {
-    const card = node("article", `decision-card${superseded ? " superseded" : ""}`);
-    card.append(node("p", "", decision.decision));
-    if (decision.rationale?.length) card.append(node("p", "card-impact", decision.rationale.join(" · ")));
-    const inherited = activeStage() === "SOLUTION" && decision.stage === "DISCOVERY" ? " · Inherited from Discovery" : "";
-    card.append(node("p", "card-meta", `${decision.status} · Product decision${inherited}`));
+  for (const decision of decisions.sort((left, right) => (right.updatedAt || "").localeCompare(left.updatedAt || ""))) {
+    const card = node("details", `decision-card${superseded ? " superseded" : ""}`);
+    const summary = node("summary", "decision-summary");
+    const title = node("span", "decision-summary-copy");
+    title.append(node("strong", "", decision.topic || decision.decision));
+    title.append(node("span", "", decision.decision));
+    summary.append(title, node("span", "decision-importance", `P${decision.importance || 2}`));
+    card.append(summary);
+    const detail = node("div", "decision-detail");
+    detail.append(decisionField("Feature", decision.feature || decision.stage));
+    detail.append(decisionField("Decision", decision.decision));
+    detail.append(decisionField("Why / Reason", decision.reason || decision.rationale?.join(" · ") || "No reason captured"));
+    detail.append(decisionField("Strength", decision.strength || "EXPLICIT"));
+    detail.append(decisionField("Importance", String(decision.importance || 2)));
+    detail.append(decisionField("Status", decision.status));
+    detail.append(decisionList("Alternatives", (decision.alternatives || []).map(item => item.rejectionReason ? `${item.option} — ${item.rejectionReason}` : item.option)));
+    detail.append(decisionList("History", decisionHistory(decision)));
+    detail.append(decisionList("Source Discussion", decisionSources(decision)));
+    detail.append(node("p", "card-meta", `Updated ${formatDate(decision.updatedAt || decision.createdAt)} · ${decision.stage}`));
+    card.append(detail);
     container.append(card);
   }
+}
+
+function decisionField(label, value) {
+  const field = node("div", "decision-field");
+  field.append(node("span", "", label), node("p", "", value));
+  return field;
+}
+
+function decisionList(label, values) {
+  const field = node("div", "decision-field");
+  field.append(node("span", "", label));
+  if (!values.length) field.append(node("p", "empty-value", "None recorded"));
+  else {
+    const list = node("ul");
+    values.forEach(value => list.append(node("li", "", value)));
+    field.append(list);
+  }
+  return field;
+}
+
+function decisionHistory(decision) {
+  const related = state.project.productSpec.decisions.filter(item => item.id === decision.supersedesDecisionId || item.id === decision.supersededBy);
+  return [
+    ...(decision.history || []).map(item => `${item.action} · ${formatDate(item.at)} · ${item.decision}${item.reason ? ` — ${item.reason}` : ""}`),
+    ...related.map(item => `${item.status} · ${item.topic || item.decision}: ${item.decision}`)
+  ];
+}
+
+function decisionSources(decision) {
+  const ids = decision.sourceMessageIds?.length ? decision.sourceMessageIds : decision.source?.messageId ? [decision.source.messageId] : [];
+  return ids.map(id => state.project.messages.find(message => message.id === id)).filter(Boolean)
+    .map(message => `${message.role === "assistant" ? "AI" : "You"}: ${message.content}`);
+}
+
+function decisionSearchText(decision) {
+  return [
+    decision.feature, decision.topic, decision.decision, decision.reason, ...(decision.rationale || []),
+    ...(decision.alternatives || []).flatMap(item => [item.option, item.rejectionReason])
+  ].filter(Boolean).join(" ").toLocaleLowerCase();
 }
 
 function node(tag, className = "", text = "") {
@@ -694,6 +828,7 @@ function renderProviderLibrary() {
   ui["provider-summary"].title = `${library.active.name} · ${activeModel}`;
   ui["provider-current-name"].textContent = library.active.name;
   ui["provider-current-model"].textContent = activeModel;
+  renderDecisionProviderSettings();
   ui["provider-profile-list"].replaceChildren();
 
   for (const profile of library.profiles) {
@@ -736,13 +871,50 @@ function renderProviderLibrary() {
       edit.addEventListener("click", () => editProviderProfile(profile));
       const remove = node("button", "text-button danger-button", "Delete");
       remove.type = "button";
-      remove.disabled = state.providerBusy || isActive;
-      remove.title = isActive ? "Switch to another provider before deleting this profile" : "Delete API profile";
+      const isDecisionProvider = profile.id === library.decisionExtraction?.profileId;
+      remove.disabled = state.providerBusy || isActive || isDecisionProvider;
+      remove.title = isActive
+        ? "Switch to another provider before deleting this profile"
+        : isDecisionProvider
+          ? "Select another Decision Extraction provider before deleting this profile"
+          : "Delete API profile";
       remove.addEventListener("click", () => void deleteProviderProfile(profile));
       actions.append(edit, remove);
     }
     card.append(copy, modelSelect, actions);
     ui["provider-profile-list"].append(card);
+  }
+}
+
+function renderDecisionProviderSettings() {
+  const library = state.providerLibrary;
+  const profiles = library?.profiles?.filter(profile => profile.kind === "openai-compatible") || [];
+  const profileSelect = ui["decision-provider-profile"];
+  profileSelect.replaceChildren();
+  for (const profile of profiles) {
+    const option = document.createElement("option");
+    option.value = profile.id;
+    option.textContent = profile.name;
+    option.selected = profile.id === library.decisionExtraction?.profileId;
+    profileSelect.append(option);
+  }
+  renderDecisionProviderModels(library?.decisionExtraction?.model);
+  const unavailable = profiles.length === 0;
+  profileSelect.disabled = state.providerBusy || unavailable;
+  ui["decision-provider-model"].disabled = state.providerBusy || unavailable;
+  ui["save-decision-provider"].disabled = state.providerBusy || unavailable;
+}
+
+function renderDecisionProviderModels(selectedModel) {
+  const profile = state.providerLibrary?.profiles?.find(item => item.id === ui["decision-provider-profile"].value);
+  const modelSelect = ui["decision-provider-model"];
+  modelSelect.replaceChildren();
+  for (const model of profile?.models || []) {
+    const option = document.createElement("option");
+    option.value = model;
+    option.textContent = model;
+    option.selected = model === selectedModel;
+    modelSelect.append(option);
   }
 }
 
@@ -829,8 +1001,48 @@ async function performStageMessage(content, action) {
   state.project = result.project;
 }
 
+async function prepareManualBridgeTurn(content, kind = "USER_MESSAGE") {
+  const result = await api(`/projects/${state.project.id}/manual-bridge/prompt`, {
+    method: "POST",
+    body: JSON.stringify(kind === "SOLUTION_START" ? { kind } : { kind, content })
+  });
+  state.manualBridgeTurn = result;
+  state.manualBridgeResponse = "";
+  ui["manual-bridge-copy-status"].textContent = "";
+  return result;
+}
+
+function clearManualBridgeTurn() {
+  state.manualBridgeTurn = null;
+  state.manualBridgeResponse = "";
+  state.pendingMessage = "";
+  ui["manual-bridge-response"].value = "";
+  ui["manual-bridge-copy-status"].textContent = "";
+}
+
+async function sendManualBridgeMessage(content) {
+  if (!state.project || state.manualBridgeTurn) return;
+  clearError();
+  state.notice = "";
+  state.pendingMessage = content;
+  setBusy(true, "Preparing the ChatGPT Manual Bridge prompt");
+  render();
+  try {
+    await prepareManualBridgeTurn(content);
+    state.notice = `ChatGPT prompt prepared from Revision ${state.manualBridgeTurn.expectedRevision}. No project state has changed yet.`;
+    ui["message-input"].value = "";
+  } catch (error) {
+    state.pendingMessage = "";
+    showError(error, content);
+  } finally {
+    setBusy(false);
+    render();
+  }
+}
+
 async function sendStageMessage(content, actionKind = "user-message") {
   if (!state.project || stageStatus() === "CONFIRMED") return;
+  if (isManualBridgeMode()) return sendManualBridgeMessage(content);
   if (state.busy && !submissionGuard.isActive()) return;
   const action = submissionGuard.begin(actionKind, { project_id: state.project.id });
   if (!action) return;
@@ -859,6 +1071,8 @@ async function sendStageMessage(content, actionKind = "user-message") {
 }
 
 function leaveProject() {
+  clearManualBridgeTurn();
+  state.dirtyArtifacts.clear();
   state.project = null;
   state.notice = "";
   window.localStorage.removeItem("discoveryProjectId");
@@ -866,6 +1080,47 @@ function leaveProject() {
   clearError();
   render();
 }
+
+function hasUnsavedWork() {
+  if (!state.project) return false;
+  return Boolean(state.manualBridgeTurn || state.dirtyArtifacts.size > 0);
+}
+
+function confirmDiscardUnsavedWork() {
+  return !hasUnsavedWork() || window.confirm("Discard unsaved artifact or Manual Bridge changes and leave this project?");
+}
+
+async function copyText(content, notice) {
+  if (!content) return;
+  try {
+    await navigator.clipboard.writeText(content);
+    state.notice = notice;
+    ui["revision-notice"].hidden = false;
+    ui["revision-notice"].textContent = notice;
+  } catch (error) {
+    showError(error);
+  }
+}
+
+const projectDeletion = createProjectDeletionController({
+  confirmDelete: message => window.confirm(message),
+  deleteById: projectId => api(`/projects/${encodeURIComponent(projectId)}`, { method: "DELETE" }),
+  getActiveProjectId: () => state.project?.id ?? null,
+  clearActiveProject: leaveProject,
+  removeProjectFromHistory(projectId) {
+    state.projects = state.projects.filter(project => project.id !== projectId);
+    renderProjectHistory();
+    renderProjectStorage();
+  },
+  refreshProjects: loadProjectHistory,
+  onConfirmed() {
+    clearError();
+    setBusy(true, "Deleting project");
+  },
+  onSettled() {
+    setBusy(false);
+  }
+});
 
 ui["provider-settings-button"].addEventListener("click", async () => {
   clearProviderError();
@@ -879,6 +1134,27 @@ ui["provider-settings-button"].addEventListener("click", async () => {
 
 ui["provider-dialog-close"].addEventListener("click", () => ui["provider-dialog"].close());
 ui["provider-form-cancel"].addEventListener("click", resetProviderForm);
+ui["decision-provider-profile"].addEventListener("change", () => renderDecisionProviderModels());
+ui["save-decision-provider"].addEventListener("click", async () => {
+  if (state.providerBusy) return;
+  state.providerBusy = true;
+  clearProviderError();
+  renderProviderLibrary();
+  try {
+    state.providerLibrary = await api("/api/providers/decision-extraction", {
+      method: "POST",
+      body: JSON.stringify({
+        profileId: ui["decision-provider-profile"].value,
+        model: ui["decision-provider-model"].value
+      })
+    });
+  } catch (error) {
+    showProviderError(error);
+  } finally {
+    state.providerBusy = false;
+    renderProviderLibrary();
+  }
+});
 
 ui["provider-form"].addEventListener("submit", async event => {
   event.preventDefault();
@@ -912,9 +1188,10 @@ ui["provider-form"].addEventListener("submit", async event => {
 
 ui["projects-button"].addEventListener("click", async () => {
   if (state.busy) return;
-  leaveProject();
   try {
     await loadProjectHistory();
+    if (!confirmDiscardUnsavedWork()) return;
+    leaveProject();
     ui["project-history-title"]?.scrollIntoView({ behavior: "smooth", block: "start" });
   } catch (error) {
     showError(error);
@@ -923,6 +1200,7 @@ ui["projects-button"].addEventListener("click", async () => {
 
 ui["new-project-button"].addEventListener("click", () => {
   if (state.busy) return;
+  if (!confirmDiscardUnsavedWork()) return;
   leaveProject();
   ui["initial-requirement"].value = "";
   ui["project-name-input"].focus();
@@ -986,6 +1264,7 @@ async function clearArtifact(path, notice) {
   try {
     const result = await api(`/projects/${state.project.id}/artifacts/${path}`, { method: "DELETE" });
     state.project = result.project;
+    state.dirtyArtifacts.delete(path === "figma-prompt" ? "figma" : path);
     await loadProjectHistory();
     state.notice = notice;
   } catch (error) {
@@ -1014,17 +1293,12 @@ ui["cleanup-artifacts-button"].addEventListener("click", async () => {
 
 ui["delete-project-button"].addEventListener("click", async () => {
   if (!state.project || state.busy) return;
-  const projectName = state.project.productSpec.project.name;
-  if (!window.confirm(`Delete “${projectName}” and its generated artifacts from local storage? Export first if you need a backup.`)) return;
-  setBusy(true, "Deleting project");
+  const project = { id: state.project.id, name: state.project.productSpec.project.name };
   try {
-    await api(`/projects/${state.project.id}`, { method: "DELETE" });
-    leaveProject();
-    await loadProjectHistory();
+    await projectDeletion.deleteProject(project);
   } catch (error) {
     showError(error);
   } finally {
-    setBusy(false);
     render();
   }
 });
@@ -1033,11 +1307,12 @@ ui["create-form"].addEventListener("submit", async event => {
   event.preventDefault();
   if (state.busy && !submissionGuard.isActive()) return;
   const initialRequirement = ui["initial-requirement"].value.trim();
-  const projectName = ui["project-name-input"].value.trim() || "Untitled Discovery";
+  const projectName = ui["project-name-input"].value.trim() || initialRequirement.split(/\r?\n/)[0].slice(0, 80) || "Untitled Project";
   if (!initialRequirement) return;
   const action = submissionGuard.begin("initial-discovery", { project_name: projectName });
   if (!action) return;
   clearError();
+  clearManualBridgeTurn();
   setBusy(true, "Creating your Discovery workspace");
   let projectCreated = false;
   try {
@@ -1047,18 +1322,24 @@ ui["create-form"].addEventListener("submit", async event => {
       body: JSON.stringify({ name: projectName, initialRequirement })
     });
     projectCreated = true;
-    beginRequestProgress(action.requestId);
     void loadProjectHistory().catch(error => console.warn("Project history refresh failed", error));
     window.localStorage.setItem("discoveryProjectId", state.project.id);
     window.history.replaceState(null, "", `/?project=${encodeURIComponent(state.project.id)}`);
     const priorRevision = state.project.productSpec.version.revision;
     state.pendingMessage = initialRequirement;
     render();
-    ui["activity-title"].textContent = "Discovery is reviewing your initial requirement";
-    await performStageMessage(initialRequirement, action);
-    const nextRevision = state.project.productSpec.version.revision;
-    if (nextRevision !== priorRevision) state.notice = `Structured requirement updated · Revision ${priorRevision} → ${nextRevision}`;
-    state.pendingMessage = "";
+    if (isManualBridgeMode()) {
+      ui["activity-title"].textContent = "Preparing the first ChatGPT Manual Bridge prompt";
+      await prepareManualBridgeTurn(initialRequirement);
+      state.notice = `ChatGPT prompt prepared from Revision ${priorRevision}. No project state has changed yet.`;
+    } else {
+      beginRequestProgress(action.requestId);
+      ui["activity-title"].textContent = "Discovery is reviewing your initial requirement";
+      await performStageMessage(initialRequirement, action);
+      const nextRevision = state.project.productSpec.version.revision;
+      if (nextRevision !== priorRevision) state.notice = `Structured requirement updated · Revision ${priorRevision} → ${nextRevision}`;
+      state.pendingMessage = "";
+    }
     ui["message-input"].value = "";
   } catch (error) {
     state.pendingMessage = "";
@@ -1066,6 +1347,77 @@ ui["create-form"].addEventListener("submit", async event => {
   } finally {
     endRequestProgress();
     submissionGuard.finish(action);
+    setBusy(false);
+    render();
+  }
+});
+
+ui["interaction-mode"].addEventListener("change", () => {
+  if (state.manualBridgeTurn) {
+    ui["interaction-mode"].value = state.interactionMode;
+    return;
+  }
+  state.interactionMode = ui["interaction-mode"].value === "manual" ? "manual" : "provider";
+  window.localStorage.setItem("workflowInteractionMode", state.interactionMode);
+  state.notice = isManualBridgeMode()
+    ? "ChatGPT Manual Bridge enabled. Sending creates a copyable prompt and does not call the configured Provider."
+    : "API / Local Codex mode enabled.";
+  render();
+});
+
+ui["copy-manual-bridge-prompt"].addEventListener("click", async () => {
+  const prompt = state.manualBridgeTurn?.prompt;
+  if (!prompt) return;
+  try {
+    await navigator.clipboard.writeText(prompt);
+    ui["manual-bridge-copy-status"].textContent = "Copied. Paste it into ChatGPT.";
+  } catch (error) {
+    showError(error);
+  }
+});
+
+ui["manual-bridge-response"].addEventListener("input", () => {
+  state.manualBridgeResponse = ui["manual-bridge-response"].value;
+  ui["manual-bridge-step"].textContent = state.manualBridgeResponse.trim() ? "2 · Apply response" : "1 · Copy prompt";
+  ui["apply-manual-bridge"].disabled = state.busy || !state.manualBridgeResponse.trim();
+});
+
+ui["cancel-manual-bridge"].addEventListener("click", () => {
+  clearManualBridgeTurn();
+  state.notice = "Manual Bridge turn cancelled. Project state was not changed.";
+  render();
+});
+
+ui["apply-manual-bridge"].addEventListener("click", async () => {
+  const turn = state.manualBridgeTurn;
+  const response = state.manualBridgeResponse.trim();
+  if (!state.project || !turn || !response || state.busy) return;
+  clearError();
+  const priorRevision = state.project.productSpec.version.revision;
+  setBusy(true, "Validating and applying the ChatGPT response locally");
+  try {
+    const result = await api(`/projects/${state.project.id}/manual-bridge/apply`, {
+      method: "POST",
+      body: JSON.stringify({
+        stage: turn.stage,
+        kind: turn.kind,
+        expectedRevision: turn.expectedRevision,
+        expectedRecordVersion: turn.expectedRecordVersion,
+        turnToken: turn.turnToken,
+        userMessage: turn.userMessage,
+        response
+      })
+    });
+    state.project = result.project;
+    clearManualBridgeTurn();
+    ui["message-input"].value = "";
+    const nextRevision = state.project.productSpec.version.revision;
+    state.notice = nextRevision === priorRevision
+      ? "ChatGPT response validated and saved. No structured facts changed."
+      : `ChatGPT response validated and applied · Revision ${priorRevision} → ${nextRevision}`;
+  } catch (error) {
+    showError(error);
+  } finally {
     setBusy(false);
     render();
   }
@@ -1084,17 +1436,48 @@ ui["message-input"].addEventListener("keydown", event => {
   }
 });
 
+ui["prd-content"].addEventListener("input", () => state.dirtyArtifacts.add("prd"));
+ui["interaction-content"].addEventListener("input", () => state.dirtyArtifacts.add("interaction"));
+ui["figma-prompt-content"].addEventListener("input", () => state.dirtyArtifacts.add("figma"));
+
+ui["decision-search"].addEventListener("input", renderDecisions);
+
+ui["scan-decisions-button"].addEventListener("click", async event => {
+  event.stopPropagation();
+  if (!state.project || state.busy) return;
+  clearError();
+  setBusy(true, "整理当前项目的产品决策");
+  try {
+    const result = await api(`/projects/${state.project.id}/decisions/scan`, { method: "POST", body: "{}" });
+    state.project = result.project;
+    const scan = result.decisionScan;
+    state.notice = scan.status === "FAILED"
+      ? "对话已安全保留，但本次 Decision Extraction 失败；主流程未受影响。"
+      : scan.status === "SKIPPED"
+        ? scan.remainingMessageCount
+          ? `已有 ${scan.remainingMessageCount} 条待扫描消息，尚未达到自动批量阈值。`
+          : "没有尚未扫描的对话。"
+        : `Decision Memory 已整理：新增 ${scan.created}，更新 ${scan.updated}，替代 ${scan.superseded}，忽略 ${scan.ignored}${scan.remainingMessageCount ? `；仍有 ${scan.remainingMessageCount} 条待扫描` : ""}。`;
+  } catch (error) {
+    showError(error);
+  } finally {
+    setBusy(false);
+    render();
+  }
+});
+
 ui["retry-button"].addEventListener("click", () => {
   if (state.retryAllowed && state.lastFailedMessage) void sendStageMessage(state.lastFailedMessage, "retry");
 });
 
 ui["refresh-button"].addEventListener("click", async () => {
-  if (!state.project || state.busy) return;
+  if (state.busy) return;
   setBusy(true, "Refreshing server state");
   try {
-    state.project = await api(`/projects/${state.project.id}`);
+    if (state.project) state.project = await api(`/projects/${state.project.id}`);
+    else await Promise.all([loadProjectHistory(), loadProviderLibrary()]);
     clearError();
-    state.notice = `Server state refreshed · Revision ${state.project.productSpec.version.revision}`;
+    state.notice = state.project ? `Server state refreshed · Revision ${state.project.productSpec.version.revision}` : "Server state refreshed.";
   } catch (error) {
     showError(error);
   } finally {
@@ -1104,7 +1487,7 @@ ui["refresh-button"].addEventListener("click", async () => {
 });
 
 ui["confirm-button"].addEventListener("click", async () => {
-  if (!state.project || state.busy || stageStatus() !== "READY_FOR_CONFIRMATION") return;
+  if (!state.project || state.busy || state.manualBridgeTurn || stageStatus() !== "READY_FOR_CONFIRMATION") return;
   const stage = activeStage();
   const name = stageName();
   clearError();
@@ -1121,21 +1504,49 @@ ui["confirm-button"].addEventListener("click", async () => {
   }
 });
 
+async function reopenStage(stage) {
+  if (!state.project || state.busy) return;
+  const label = stage === "DISCOVERY" ? "Discovery" : "Product Solution";
+  const unsavedWarning = hasUnsavedWork() ? " Unsaved artifact edits will be discarded." : "";
+  if (!window.confirm(`Reopen ${label}? Confirmed downstream state and generated artifacts will be marked for review or stale.${unsavedWarning}`)) return;
+  clearError();
+  setBusy(true, `Reopening ${label}`);
+  try {
+    const result = await api(`/projects/${state.project.id}/stages/${stage.toLowerCase()}/reopen`, { method: "POST", body: "{}" });
+    state.project = result.project;
+    state.dirtyArtifacts.clear();
+    state.notice = `${label} reopened. Update it in the conversation, then confirm again.`;
+  } catch (error) {
+    showError(error);
+  } finally {
+    setBusy(false);
+    render();
+  }
+}
+
+ui["reopen-stage-button"].addEventListener("click", () => void reopenStage(activeStage()));
+ui["reopen-discovery-button"].addEventListener("click", () => void reopenStage("DISCOVERY"));
+
 ui["start-solution-button"].addEventListener("click", async () => {
-  if (!state.project || state.busy || discoveryStatusForProject() !== "CONFIRMED" || state.project.workflow.stages.SOLUTION.status !== "NOT_STARTED") return;
+  if (!state.project || state.busy || state.manualBridgeTurn || discoveryStatusForProject() !== "CONFIRMED" || state.project.workflow.stages.SOLUTION.status !== "NOT_STARTED") return;
   const action = submissionGuard.begin("start-solution", { project_id: state.project.id });
   if (!action) return;
   clearError();
-  beginRequestProgress(action.requestId);
-  setBusy(true, "Building the initial Product Solution from confirmed Discovery");
+  if (!isManualBridgeMode()) beginRequestProgress(action.requestId);
+  setBusy(true, isManualBridgeMode() ? "Preparing the Product Solution ChatGPT prompt" : "Building the initial Product Solution from confirmed Discovery");
   try {
-    const result = await api(`/projects/${state.project.id}/stages/solution/start`, {
-      method: "POST",
-      headers: { "x-request-id": action.requestId },
-      body: "{}"
-    });
-    state.project = result.project;
-    state.notice = `Product Solution started · Revision ${state.project.productSpec.version.revision}`;
+    if (isManualBridgeMode()) {
+      await prepareManualBridgeTurn("", "SOLUTION_START");
+      state.notice = `Product Solution kickoff prompt prepared from Revision ${state.manualBridgeTurn.expectedRevision}. The stage will start only after the pasted response validates.`;
+    } else {
+      const result = await api(`/projects/${state.project.id}/stages/solution/start`, {
+        method: "POST",
+        headers: { "x-request-id": action.requestId },
+        body: "{}"
+      });
+      state.project = result.project;
+      state.notice = `Product Solution started · Revision ${state.project.productSpec.version.revision}`;
+    }
   } catch (error) {
     showError(error);
   } finally {
@@ -1151,16 +1562,21 @@ ui["generate-prd-button"].addEventListener("click", async () => {
   const action = submissionGuard.begin("generate-prd", { project_id: state.project.id });
   if (!action) return;
   clearError();
+  beginRequestProgress(action.requestId);
   setBusy(true, "Selecting PRD capabilities and generating Requirement Details");
   try {
-    const result = await api(`/projects/${state.project.id}/artifacts/prd/generate`, { method: "POST", body: "{}" });
+    const result = await api(`/projects/${state.project.id}/artifacts/prd/generate`, {
+      method: "POST", headers: { "x-request-id": action.requestId }, body: "{}"
+    });
     state.project = result.project;
+    state.dirtyArtifacts.delete("prd");
     state.notice = result.artifact.reviewStatus === "BLOCKED"
       ? "PRD generation stopped because required context or Capability is missing."
       : "PRD Requirement Details generated as a reviewable draft.";
   } catch (error) {
     showError(error);
   } finally {
+    endRequestProgress();
     submissionGuard.finish(action);
     setBusy(false);
     render();
@@ -1173,13 +1589,16 @@ ui["submit-prd-clarification-button"].addEventListener("click", async () => {
   const action = submissionGuard.begin("clarify-prd", { project_id: state.project.id });
   if (!action) return;
   clearError();
+  beginRequestProgress(action.requestId);
   setBusy(true, "Continuing PRD generation from the saved clarification");
   try {
     const result = await api(`/projects/${state.project.id}/artifacts/prd/clarify`, {
       method: "POST",
+      headers: { "x-request-id": action.requestId },
       body: JSON.stringify({ answer })
     });
     state.project = result.project;
+    state.dirtyArtifacts.delete("prd");
     ui["prd-clarification-answer"].value = "";
     state.notice = result.artifact.reviewStatus === "BLOCKED"
       ? "The clarification was saved, but PRD generation still needs confirmed input."
@@ -1187,6 +1606,7 @@ ui["submit-prd-clarification-button"].addEventListener("click", async () => {
   } catch (error) {
     showError(error);
   } finally {
+    endRequestProgress();
     submissionGuard.finish(action);
     setBusy(false);
     render();
@@ -1220,6 +1640,7 @@ ui["save-prd-button"].addEventListener("click", async () => {
       body: JSON.stringify({ content })
     });
     state.project = result.project;
+    state.dirtyArtifacts.delete("prd");
     state.notice = "PRD changes saved. Review and confirm when ready.";
   } catch (error) {
     showError(error);
@@ -1227,6 +1648,10 @@ ui["save-prd-button"].addEventListener("click", async () => {
     setBusy(false);
     render();
   }
+});
+
+ui["copy-prd-button"].addEventListener("click", () => {
+  void copyText(ui["prd-content"].value, "PRD Markdown copied.");
 });
 
 ui["confirm-prd-button"].addEventListener("click", async () => {
@@ -1243,6 +1668,7 @@ ui["confirm-prd-button"].addEventListener("click", async () => {
     }
     const result = await api(`/projects/${state.project.id}/artifacts/prd/confirm`, { method: "POST", body: "{}" });
     state.project = result.project;
+    state.dirtyArtifacts.delete("prd");
     state.notice = "PRD Requirement Details confirmed. Interaction Design can continue from this version.";
   } catch (error) {
     showError(error);
@@ -1257,16 +1683,21 @@ async function generateInteraction() {
   const action = submissionGuard.begin("generate-interaction", { project_id: state.project.id });
   if (!action) return;
   clearError();
+  beginRequestProgress(action.requestId);
   setBusy(true, "Generating the Interaction Specification");
   try {
-    const result = await api(`/projects/${state.project.id}/artifacts/interaction/generate`, { method: "POST", body: "{}" });
+    const result = await api(`/projects/${state.project.id}/artifacts/interaction/generate`, {
+      method: "POST", headers: { "x-request-id": action.requestId }, body: "{}"
+    });
     state.project = result.project;
+    state.dirtyArtifacts.delete("interaction");
     state.notice = result.artifact.reviewStatus === "BLOCKED"
       ? "Interaction generation stopped because confirmed input is missing."
       : "Interaction Specification generated as a reviewable draft.";
   } catch (error) {
     showError(error);
   } finally {
+    endRequestProgress();
     submissionGuard.finish(action);
     setBusy(false);
     render();
@@ -1282,13 +1713,16 @@ ui["submit-interaction-clarification-button"].addEventListener("click", async ()
   const action = submissionGuard.begin("clarify-interaction", { project_id: state.project.id });
   if (!action) return;
   clearError();
+  beginRequestProgress(action.requestId);
   setBusy(true, "Continuing Interaction generation from the saved clarification");
   try {
     const result = await api(`/projects/${state.project.id}/artifacts/interaction/clarify`, {
       method: "POST",
+      headers: { "x-request-id": action.requestId },
       body: JSON.stringify({ answer })
     });
     state.project = result.project;
+    state.dirtyArtifacts.delete("interaction");
     ui["interaction-clarification-answer"].value = "";
     state.notice = result.artifact.reviewStatus === "BLOCKED"
       ? "The clarification was saved, but Interaction still needs confirmed input."
@@ -1296,6 +1730,7 @@ ui["submit-interaction-clarification-button"].addEventListener("click", async ()
   } catch (error) {
     showError(error);
   } finally {
+    endRequestProgress();
     submissionGuard.finish(action);
     setBusy(false);
     render();
@@ -1313,6 +1748,7 @@ ui["save-interaction-button"].addEventListener("click", async () => {
       body: JSON.stringify({ content })
     });
     state.project = result.project;
+    state.dirtyArtifacts.delete("interaction");
     state.notice = "Interaction changes saved.";
   } catch (error) {
     showError(error);
@@ -1320,6 +1756,10 @@ ui["save-interaction-button"].addEventListener("click", async () => {
     setBusy(false);
     render();
   }
+});
+
+ui["copy-interaction-button"].addEventListener("click", () => {
+  void copyText(ui["interaction-content"].value, "Interaction Specification Markdown copied.");
 });
 
 ui["confirm-interaction-button"].addEventListener("click", async () => {
@@ -1336,6 +1776,7 @@ ui["confirm-interaction-button"].addEventListener("click", async () => {
     }
     const result = await api(`/projects/${state.project.id}/artifacts/interaction/confirm`, { method: "POST", body: "{}" });
     state.project = result.project;
+    state.dirtyArtifacts.delete("interaction");
     state.notice = "Interaction Specification confirmed. Figma Prompt assembly can continue.";
   } catch (error) {
     showError(error);
@@ -1350,16 +1791,21 @@ ui["generate-figma-prompt-button"].addEventListener("click", async () => {
   const action = submissionGuard.begin("generate-figma-prompt", { project_id: state.project.id });
   if (!action) return;
   clearError();
+  beginRequestProgress(action.requestId);
   setBusy(true, "Selecting Figma capabilities and assembling the Codex prompt");
   try {
-    const result = await api(`/projects/${state.project.id}/artifacts/figma-prompt/generate`, { method: "POST", body: "{}" });
+    const result = await api(`/projects/${state.project.id}/artifacts/figma-prompt/generate`, {
+      method: "POST", headers: { "x-request-id": action.requestId }, body: "{}"
+    });
     state.project = result.project;
+    state.dirtyArtifacts.delete("figma");
     state.notice = result.artifact.reviewStatus === "BLOCKED"
       ? "Figma Prompt assembly stopped because a required Capability is missing."
       : "Codex Figma prototype prompt assembled from the confirmed workflow context.";
   } catch (error) {
     showError(error);
   } finally {
+    endRequestProgress();
     submissionGuard.finish(action);
     setBusy(false);
     render();
@@ -1377,6 +1823,7 @@ ui["save-figma-prompt-button"].addEventListener("click", async () => {
       body: JSON.stringify({ content })
     });
     state.project = result.project;
+    state.dirtyArtifacts.delete("figma");
     state.notice = "Codex Figma prompt changes saved.";
   } catch (error) {
     showError(error);
@@ -1387,15 +1834,7 @@ ui["save-figma-prompt-button"].addEventListener("click", async () => {
 });
 
 ui["copy-figma-prompt-button"].addEventListener("click", async () => {
-  const content = ui["figma-prompt-content"].value;
-  if (!content) return;
-  try {
-    await navigator.clipboard.writeText(content);
-    state.notice = "Codex Figma prototype prompt copied.";
-    render();
-  } catch (error) {
-    showError(error);
-  }
+  await copyText(ui["figma-prompt-content"].value, "Codex Figma prototype prompt copied.");
 });
 
 ui["confirm-figma-prompt-button"].addEventListener("click", async () => {
@@ -1412,6 +1851,7 @@ ui["confirm-figma-prompt-button"].addEventListener("click", async () => {
     }
     const result = await api(`/projects/${state.project.id}/artifacts/figma-prompt/confirm`, { method: "POST", body: "{}" });
     state.project = result.project;
+    state.dirtyArtifacts.delete("figma");
     state.notice = "Codex Figma prototype prompt confirmed and ready to copy.";
   } catch (error) {
     showError(error);
@@ -1430,7 +1870,10 @@ async function restoreProject() {
   const projectId = queryProjectId || window.localStorage.getItem("discoveryProjectId");
   if (!projectId) return;
   try {
-    state.project = await api(`/projects/${encodeURIComponent(projectId)}`);
+    const project = await api(`/projects/${encodeURIComponent(projectId)}`);
+    if (projectDeletion.wasDeleted(projectId)) return;
+    state.project = project;
+    state.dirtyArtifacts.clear();
     window.localStorage.setItem("discoveryProjectId", state.project.id);
     window.history.replaceState(null, "", `/?project=${encodeURIComponent(state.project.id)}`);
     render();
@@ -1457,3 +1900,9 @@ async function initializeWorkspace() {
 }
 
 void initializeWorkspace();
+
+window.addEventListener("beforeunload", event => {
+  if (!hasUnsavedWork()) return;
+  event.preventDefault();
+  event.returnValue = "";
+});

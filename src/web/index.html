@@ -29,7 +29,31 @@
             <p class="section-kicker">Conversation</p>
             <h2 id="conversation-title">Discovery Conversation</h2>
           </div>
-          <p id="project-name" class="project-name"></p>
+          <div class="conversation-heading-meta">
+            <label for="interaction-mode">Interaction mode</label>
+            <select id="interaction-mode">
+              <option value="provider">API / Local Codex</option>
+              <option value="manual">ChatGPT Manual Bridge · Experimental</option>
+            </select>
+            <p id="project-name" class="project-name"></p>
+          </div>
+        </div>
+
+        <nav id="workflow-progress" class="workflow-progress" aria-label="Workflow progress" hidden>
+          <span id="stage-step-discovery">Discovery</span>
+          <span id="stage-step-solution">Solution</span>
+          <span id="stage-step-prd">PRD</span>
+          <span id="stage-step-interaction">Interaction</span>
+          <span id="stage-step-figma">Figma Prompt</span>
+        </nav>
+
+        <div id="error-panel" class="error-panel global-error-panel" hidden role="alert">
+          <strong id="error-title">Request failed</strong>
+          <p id="error-message"></p>
+          <div class="error-actions">
+            <button id="retry-button" class="secondary-button" type="button" hidden>Retry this message</button>
+            <button id="refresh-button" class="text-button" type="button">Refresh server state</button>
+          </div>
         </div>
 
         <div id="create-view" class="create-view">
@@ -40,7 +64,7 @@
           </div>
           <form id="create-form" class="create-form">
             <label for="project-name-input">Project name</label>
-            <input id="project-name-input" name="projectName" value="Creator PK Discovery" maxlength="120" />
+            <input id="project-name-input" name="projectName" maxlength="120" placeholder="Optional — defaults to the first line of the requirement" />
             <label for="initial-requirement">Initial Requirement</label>
             <textarea id="initial-requirement" name="initialRequirement" rows="8" required placeholder="例如：我们刚上线一个主播 1v1 PK 功能……"></textarea>
             <button id="create-button" class="primary-button" type="submit">Create Project &amp; Start Discovery</button>
@@ -64,6 +88,29 @@
             <div id="initial-requirement-card" class="requirement-card"></div>
             <div id="messages" class="messages" aria-live="polite"></div>
 
+          <section id="manual-bridge-panel" class="manual-bridge-panel" hidden aria-labelledby="manual-bridge-title">
+            <div class="manual-bridge-heading">
+              <div>
+                <p class="section-kicker">Experimental · no API call</p>
+                <h3 id="manual-bridge-title">Continue this turn in ChatGPT</h3>
+              </div>
+              <span id="manual-bridge-step" class="status-badge">1 · Copy prompt</span>
+            </div>
+            <p class="manual-bridge-help">Copy the generated prompt into ChatGPT, continue the discussion there, then paste the complete response back here. Project state changes only after local validation succeeds.</p>
+            <label for="manual-bridge-prompt">Workflow prompt</label>
+            <textarea id="manual-bridge-prompt" rows="8" readonly></textarea>
+            <div class="manual-bridge-actions">
+              <button id="copy-manual-bridge-prompt" class="secondary-button" type="button">Copy prompt</button>
+              <span id="manual-bridge-copy-status" aria-live="polite"></span>
+            </div>
+            <label for="manual-bridge-response">Complete ChatGPT response</label>
+            <textarea id="manual-bridge-response" rows="10" placeholder="Paste both the natural-language answer and the AI_PRODUCT_WORKFLOW_UPDATE block…"></textarea>
+            <div class="manual-bridge-footer">
+              <button id="cancel-manual-bridge" class="text-button" type="button">Cancel this turn</button>
+              <button id="apply-manual-bridge" class="primary-button" type="button">Validate &amp; apply response</button>
+            </div>
+          </section>
+
           <div id="activity" class="activity" hidden aria-live="polite">
             <span class="spinner" aria-hidden="true"></span>
             <div>
@@ -73,15 +120,6 @@
           </div>
 
           <div id="revision-notice" class="revision-notice" hidden></div>
-          <div id="error-panel" class="error-panel" hidden role="alert">
-              <strong id="error-title">Stage request failed</strong>
-            <p id="error-message"></p>
-            <div class="error-actions">
-              <button id="retry-button" class="secondary-button" type="button" hidden>Retry this message</button>
-              <button id="refresh-button" class="text-button" type="button">Refresh server state</button>
-            </div>
-          </div>
-
           <div id="confirmation-panel" class="confirmation-panel" hidden>
             <div>
               <p class="section-kicker">Ready for your decision</p>
@@ -100,6 +138,8 @@
             <button id="start-solution-button" class="primary-button" type="button">Start Product Solution</button>
             <button id="generate-prd-button" class="primary-button" type="button" hidden>Generate PRD Requirement Details</button>
             <button id="continue-interaction-button" class="secondary-button" type="button" disabled hidden>Continue to Interaction Design</button>
+            <button id="reopen-stage-button" class="secondary-button" type="button">Reopen current stage</button>
+            <button id="reopen-discovery-button" class="text-button" type="button" hidden>Reopen Discovery instead</button>
           </div>
 
           <section id="prd-panel" class="prd-panel" hidden>
@@ -121,6 +161,7 @@
             <div class="prd-actions">
               <span id="prd-source" class="prd-source"></span>
               <div>
+                <button id="copy-prd-button" class="secondary-button" type="button">Copy Markdown</button>
                 <button id="save-prd-button" class="secondary-button" type="button">Save changes</button>
                 <button id="confirm-prd-button" class="confirm-button" type="button">Confirm PRD</button>
               </div>
@@ -146,6 +187,7 @@
               <span id="interaction-source" class="prd-source"></span>
               <div>
                 <button id="generate-interaction-button" class="primary-button" type="button">Generate Interaction Specification</button>
+                <button id="copy-interaction-button" class="secondary-button" type="button">Copy Markdown</button>
                 <button id="save-interaction-button" class="secondary-button" type="button">Save changes</button>
                 <button id="confirm-interaction-button" class="confirm-button" type="button">Confirm Interaction</button>
               </div>
@@ -206,39 +248,47 @@
 
         <div id="spec-content" class="spec-content"></div>
 
-        <section class="side-section questions-section">
-          <div class="section-title-row">
+        <details class="side-section questions-section" open>
+          <summary class="section-title-row">
             <h3>Blocking Open Questions</h3>
             <span id="blocking-count" class="count-badge count-danger">0</span>
-          </div>
+          </summary>
           <div id="blocking-questions" class="card-list"></div>
-        </section>
+        </details>
 
-        <section class="side-section questions-section">
-          <div class="section-title-row">
+        <details class="side-section questions-section">
+          <summary class="section-title-row">
             <h3>Non-blocking Open Questions</h3>
             <span id="nonblocking-count" class="count-badge">0</span>
-          </div>
+          </summary>
           <div id="nonblocking-questions" class="card-list"></div>
-        </section>
+        </details>
 
-        <section class="side-section decisions-section">
-          <div class="section-title-row">
-            <h3 id="decisions-title">Discovery Decisions</h3>
-            <span class="fact-decision-key"><i></i> Product decision</span>
+        <details class="side-section decisions-section">
+          <summary class="section-title-row">
+            <h3 id="decisions-title">Decision Memory</h3>
+            <button id="scan-decisions-button" class="text-button" type="button">整理决策</button>
+          </summary>
+          <div class="decision-tools">
+            <input id="decision-search" type="search" placeholder="Search topic, decision, reason, alternatives…" aria-label="Search decisions" />
+            <span id="decision-scan-status" class="decision-scan-status"></span>
           </div>
           <div id="active-decisions" class="card-list"></div>
+          <details id="deferred-decisions-wrap" class="superseded-wrap" hidden>
+            <summary>Deferred / tentative decisions (<span id="deferred-count">0</span>)</summary>
+            <div id="deferred-decisions" class="card-list"></div>
+          </details>
           <details id="superseded-decisions-wrap" class="superseded-wrap" hidden>
             <summary>Superseded decisions (<span id="superseded-count">0</span>)</summary>
             <div id="superseded-decisions" class="card-list"></div>
           </details>
-        </section>
+        </details>
 
-        <section id="project-storage-section" class="side-section storage-section" hidden>
-          <div class="section-title-row">
+        <details id="project-storage-section" class="side-section storage-section" hidden>
+          <summary class="section-title-row">
             <h3>Project files &amp; cleanup</h3>
             <span id="storage-kind" class="count-badge">LOCAL</span>
-          </div>
+          </summary>
           <label class="storage-label" for="manage-project-name">Project name</label>
           <div class="rename-row">
             <input id="manage-project-name" maxlength="120" />
@@ -267,7 +317,7 @@
             <button id="cleanup-artifacts-button" class="secondary-button" type="button">Clean stale / failed artifacts</button>
             <button id="delete-project-button" class="secondary-button destructive-button" type="button">Delete project</button>
           </div>
-        </section>
+        </details>
       </aside>
     </main>
 
@@ -286,6 +336,23 @@
         <span>Current</span>
         <strong id="provider-current-name">Loading…</strong>
         <small id="provider-current-model">—</small>
+      </section>
+
+      <section class="provider-library-section decision-provider-section">
+        <div class="provider-section-heading">
+          <div>
+            <p class="section-kicker">Background auxiliary task</p>
+            <h3>Decision Extraction Provider</h3>
+          </div>
+        </div>
+        <p class="provider-section-help">Always uses a saved Relay profile, independently from the main workflow provider.</p>
+        <div class="decision-provider-form">
+          <label for="decision-provider-profile">Relay profile</label>
+          <select id="decision-provider-profile"></select>
+          <label for="decision-provider-model">Model</label>
+          <select id="decision-provider-model"></select>
+          <button id="save-decision-provider" class="secondary-button" type="button">Save Decision Provider</button>
+        </div>
       </section>
 
       <section class="provider-library-section">

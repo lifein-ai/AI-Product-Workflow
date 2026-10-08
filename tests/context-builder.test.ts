@@ -63,7 +63,7 @@ test("Discovery projection includes only OPEN questions and ACTIVE decisions wit
   assert.deepEqual(project.productSpec, before);
   assert.equal(project.productSpec.openQuestions.length, 22);
   assert.equal(project.productSpec.decisions.length, 11);
-  assert.match(context.instructions, /Never rewrite an unchanged field/);
+  assert.doesNotMatch(context.instructions, /# COMPLETION PROTOCOL|complete_discovery_turn/);
 });
 
 test("Solution projection excludes resolved questions and superseded or deferred decisions", () => {

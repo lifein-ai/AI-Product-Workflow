@@ -49,8 +49,17 @@ test("project management API lists, renames, exports, cleans artifacts, and dele
     assert.match(exported.headers["content-disposition"] ?? "", /attachment/);
     assert.equal(JSON.parse(exported.body).productSpec.project.name, "Renamed");
 
+    const survivorResponse = await app.inject({
+      method: "POST",
+      url: "/projects",
+      payload: { name: "Current project", initialRequirement: "Must remain after deleting another project" }
+    });
+    const survivorId = survivorResponse.json().id as string;
+
     assert.equal((await app.inject({ method: "DELETE", url: `/projects/${id}` })).statusCode, 204);
     assert.equal((await app.inject({ method: "GET", url: `/projects/${id}` })).statusCode, 404);
+    assert.equal((await app.inject({ method: "GET", url: `/projects/${survivorId}` })).statusCode, 200);
+    assert.deepEqual((await app.inject({ method: "GET", url: "/projects" })).json().projects.map((project: { id: string }) => project.id), [survivorId]);
   } finally {
     await app.close();
   }

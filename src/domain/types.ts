@@ -208,13 +208,22 @@ export interface OpenQuestion {
 
 export interface Decision {
   id: string;
+  projectId?: string;
   stage: ReasoningStage;
+  feature?: string;
+  topic?: string;
   decision: string;
   rationale: string[];
+  reason?: string | null;
+  alternatives?: DecisionAlternative[];
+  importance?: 1 | 2 | 3;
+  strength?: "EXPLICIT" | "IMPLIED" | "TENTATIVE";
+  sourceMessageIds?: string[];
+  history?: DecisionHistoryEntry[];
   affectedPaths: string[];
   status: "ACTIVE" | "SUPERSEDED" | "DEFERRED";
   source?: {
-    type: "INITIAL_REQUIREMENT" | "USER_MESSAGE" | "VALIDATION_RESULT" | "SYSTEM" | "LEGACY";
+    type: "INITIAL_REQUIREMENT" | "USER_MESSAGE" | "VALIDATION_RESULT" | "DECISION_EXTRACTION" | "SYSTEM" | "LEGACY";
     messageId?: string;
     requestId?: string;
   };
@@ -222,6 +231,28 @@ export interface Decision {
   updatedAt?: string;
   supersedesDecisionId?: string;
   supersededBy?: string;
+}
+
+export interface DecisionAlternative {
+  option: string;
+  rejectionReason: string | null;
+}
+
+export interface DecisionHistoryEntry {
+  action: "CREATED" | "UPDATED" | "SUPERSEDED";
+  at: string;
+  decision: string;
+  reason: string | null;
+  sourceMessageIds: string[];
+}
+
+export interface DecisionMemoryState {
+  lastScannedMessageId?: string;
+  lastScannedAt?: string;
+  lastAttemptAt?: string;
+  status: "IDLE" | "PENDING" | "FAILED";
+  pendingMessageCount?: number;
+  lastError?: string;
 }
 
 export interface ConfirmedProductState {
@@ -443,4 +474,5 @@ export interface ProjectRecord {
   workflow: WorkflowState;
   artifacts: ProjectArtifacts;
   messages: ConversationMessage[];
+  decisionMemory: DecisionMemoryState;
 }

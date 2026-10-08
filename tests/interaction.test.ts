@@ -60,6 +60,8 @@ test("Interaction is a one-call Generation artifact and human edits invalidate F
   assert.equal(calls, 1);
   assert.equal(generated.artifact.reviewStatus, "DRAFT");
   assert.ok(generated.artifact.sourceVersions?.confirmedProductStateHash);
+  await assert.rejects(() => service.generate(created.id), /must be cleared/);
+  assert.equal(calls, 1);
 
   const beforeEdit = (await repo.getById(created.id))!;
   beforeEdit.artifacts.figmaPrompt = {

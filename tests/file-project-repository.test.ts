@@ -25,8 +25,17 @@ test("file repository persists, lists, protects concurrent writes, and deletes o
     await restartedRepository.save(firstWriter);
     await assert.rejects(() => restartedRepository.save(staleWriter), /changed concurrently/);
 
+    const withArtifacts = await restartedRepository.getById(created.id);
+    assert.ok(withArtifacts);
+    withArtifacts.artifacts.prd.lifecycleStatus = "CURRENT";
+    withArtifacts.artifacts.prd.reviewStatus = "DRAFT";
+    withArtifacts.artifacts.prd.generatedContent = "generated PRD";
+    withArtifacts.artifacts.prd.currentContent = "generated PRD";
+    await restartedRepository.save(withArtifacts);
+
     assert.equal(await restartedRepository.delete(created.id), true);
     assert.equal(await restartedRepository.getById(created.id), null);
+    assert.equal((await new FileProjectRepository(directory).list()).length, 0);
     assert.equal(await restartedRepository.delete(created.id), false);
   } finally {
     await rm(directory, { recursive: true, force: true });

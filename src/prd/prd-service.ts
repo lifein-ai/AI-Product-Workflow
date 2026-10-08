@@ -22,6 +22,9 @@ export class PrdService {
 
   async generate(projectId: string): Promise<{ artifact: PrdArtifactState; project: ProjectRecord }> {
     const project = await this.loadProject(projectId);
+    if (project.artifacts.prd.lifecycleStatus === "CURRENT") {
+      throw new Error("Current PRD must be cleared before generating a replacement");
+    }
     const sourceContext = buildPrdSourceContext(project);
     const plan = normalizeMetaPlan(await this.runMetaAnalysis(sourceContext));
     const selectedIds = selectionIds(plan);

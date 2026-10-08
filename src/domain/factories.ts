@@ -121,6 +121,7 @@ export function createProjectRecord(name: string, initialRequirement: string): P
       interaction: emptyInteractionArtifact(timestamp),
       figmaPrompt: emptyFigmaPromptArtifact(timestamp)
     },
-    messages: []
+    messages: [],
+    decisionMemory: { status: "IDLE" }
   };
 }

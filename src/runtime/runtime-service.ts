@@ -5,6 +5,7 @@ import { runToolLoop } from "./tool-loop.js";
 import { measureLatencyStep, measureLatencyStepSync } from "../observability/latency-trace.js";
 import { startStage } from "../workflow/state-machine.js";
 import { RequestProgressStore } from "./request-progress.js";
+import { SOLUTION_KICKOFF } from "./stage-messages.js";
 
 export class RuntimeService {
   constructor(
@@ -50,8 +51,7 @@ export class RuntimeService {
       const project = await measureLatencyStep("repository_read", () => this.repo.getById(projectId));
       if (!project) throw new Error("Project not found");
       startStage(project, "SOLUTION");
-      const kickoff = "基于已确认的 Discovery，提出 Product Solution V0 初始方案；继承已有约束、假设与决策，不重复 Requirement Discovery。";
-      const reply = await measureLatencyStep("tool_loop_total", () => runToolLoop(project, kickoff, this.ai, requestId, {
+      const reply = await measureLatencyStep("tool_loop_total", () => runToolLoop(project, SOLUTION_KICKOFF, this.ai, requestId, {
         type: "SYSTEM",
         ...(requestId ? { requestId } : {})
       }, this.reporter(requestId)));

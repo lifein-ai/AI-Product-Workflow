@@ -97,6 +97,8 @@ test("Figma Prompt uses one Meta call then deterministic assembly", async () => 
   assert.doesNotMatch(requests[0].instructions, /Host 可管理 Guest Seat。/);
   assert.equal(result.artifact.lifecycleStatus, "CURRENT");
   assert.equal(result.artifact.reviewStatus, "DRAFT");
+  await assert.rejects(() => new FigmaPromptService(repo, ai).generate(created.id), /must be cleared/);
+  assert.equal(requests.length, 1);
   assert.equal(result.artifact.sourceVersions?.discovery, 2);
   assert.equal(result.artifact.sourceVersions?.solution, 4);
   assert.equal(result.artifact.sourceVersions?.prd, 3);

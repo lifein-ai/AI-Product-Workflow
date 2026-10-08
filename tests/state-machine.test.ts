@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createProjectRecord } from "../src/domain/factories.js";
-import { applyReadyEvaluation, confirmStage, markStageContentChanged, reopenSolution, startStage } from "../src/workflow/state-machine.js";
+import { applyReadyEvaluation, confirmStage, markStageContentChanged, reopenDiscovery, reopenSolution, startStage } from "../src/workflow/state-machine.js";
 
 test("Discovery can become ready then confirmed", () => {
   const project = createProjectRecord("PK", "做主播PK");
@@ -57,4 +57,25 @@ test("a blocked PRD can explicitly reopen confirmed Solution for missing product
   assert.equal(project.workflow.stages.SOLUTION.status, "IN_PROGRESS");
   assert.equal(project.workflow.stages.SOLUTION.confirmedVersion, undefined);
   assert.equal(project.artifacts.prd.lifecycleStatus, "STALE");
+});
+
+test("reopening confirmed Discovery returns to conversation and invalidates downstream work", () => {
+  const project = createProjectRecord("Reopen Discovery", "Update the target user");
+  project.workflow.stages.DISCOVERY.status = "CONFIRMED";
+  project.workflow.stages.DISCOVERY.confirmedVersion = 1;
+  project.workflow.stages.SOLUTION.status = "CONFIRMED";
+  project.workflow.stages.SOLUTION.confirmedVersion = 2;
+  project.workflow.activeStage = null;
+  project.artifacts.prd.lifecycleStatus = "CURRENT";
+  project.artifacts.interaction.lifecycleStatus = "CURRENT";
+  project.artifacts.figmaPrompt.lifecycleStatus = "CURRENT";
+
+  reopenDiscovery(project);
+
+  assert.equal(project.workflow.activeStage, "DISCOVERY");
+  assert.equal(project.workflow.stages.DISCOVERY.status, "IN_PROGRESS");
+  assert.equal(project.workflow.stages.SOLUTION.status, "NEEDS_REVIEW");
+  assert.equal(project.artifacts.prd.lifecycleStatus, "STALE");
+  assert.equal(project.artifacts.interaction.lifecycleStatus, "STALE");
+  assert.equal(project.artifacts.figmaPrompt.lifecycleStatus, "STALE");
 });

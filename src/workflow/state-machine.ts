@@ -135,3 +135,19 @@ export function reopenSolution(project: ProjectRecord): void {
   }
   invalidateInteractionArtifact(project);
 }
+
+export function reopenDiscovery(project: ProjectRecord): void {
+  const state = project.workflow.stages.DISCOVERY;
+  if (state.status === "IN_PROGRESS" && project.workflow.activeStage === "DISCOVERY") return;
+  if (state.status !== "CONFIRMED") throw new Error(`Cannot reopen Discovery from status ${state.status}`);
+
+  state.status = "IN_PROGRESS";
+  state.readyEvaluation = undefined;
+  state.confirmedVersion = undefined;
+  state.updatedAt = now();
+  project.workflow.activeStage = "DISCOVERY";
+  invalidateConfirmedProductState(project);
+  invalidateIfStarted(project, "SOLUTION");
+  invalidateIfStarted(project, "INTERACTION");
+  invalidatePrdArtifact(project);
+}

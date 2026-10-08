@@ -36,7 +36,14 @@ export interface ProviderProfileView {
 export interface ProviderLibraryState {
   activeProfileId: string;
   active: ProviderProfileView;
+  decisionExtraction: DecisionExtractionProviderView | null;
   profiles: ProviderProfileView[];
+}
+
+export interface DecisionExtractionProviderView {
+  profileId: string;
+  profileName: string;
+  model: string;
 }
 
 export interface ProviderInstance {
@@ -47,6 +54,7 @@ export interface ProviderInstance {
 interface PersistedProviderLibrary {
   version: 1;
   activeProfileId: string;
+  decisionExtraction?: { profileId: string; model: string };
   profiles: ProviderProfileRecord[];
 }
 
@@ -66,6 +74,7 @@ const profileSchema = z.object({
 const librarySchema = z.object({
   version: z.literal(1),
   activeProfileId: z.string(),
+  decisionExtraction: z.object({ profileId: z.string(), model: z.string() }).optional(),
   profiles: z.array(profileSchema)
 });
 
@@ -81,6 +90,7 @@ export class ProviderLibrary implements AIProvider {
   private readonly instantiate: (profile: ProviderProfileRecord) => ProviderInstance;
   private profiles: ProviderProfileRecord[];
   private activeProfileId: string;
+  private decisionExtraction: { profileId: string; model: string } | null;
   private activeInstance: ProviderInstance;
 
   constructor(options: {
@@ -94,22 +104,50 @@ export class ProviderLibrary implements AIProvider {
     const persisted = this.readPersisted();
     this.profiles = mergeProfiles(persisted?.profiles ?? [], options.seedProfiles, persisted === null);
     this.activeProfileId = selectInitialProfile(this.profiles, persisted?.activeProfileId, options.preferredKind);
+    this.decisionExtraction = selectDecisionExtraction(this.profiles, persisted?.decisionExtraction);
     this.activeInstance = this.instantiate(this.requireRecord(this.activeProfileId));
   }
 
   async initialize(): Promise<void> {
-    await this.activeInstance.initialize();
+    try {
+      await this.activeInstance.initialize();
+    } catch (error) {
+      const fallback = this.profiles.find(profile =>
+        profile.id !== this.activeProfileId
+        && profile.kind === "openai-compatible"
+        && Boolean(profile.baseURL && profile.apiKey && profile.activeModel)
+      );
+      if (!fallback) throw error;
+      const fallbackInstance = this.instantiate(fallback);
+      await fallbackInstance.initialize();
+      this.activeProfileId = fallback.id;
+      this.activeInstance = fallbackInstance;
+      this.persist();
+    }
   }
 
   async generate(request: AIProviderRequest): Promise<ModelResponse> {
     return this.activeInstance.provider.generate(request);
   }
 
+  async generateDecision(request: AIProviderRequest): Promise<ModelResponse> {
+    if (!this.decisionExtraction) throw new ProviderLibraryError("A Relay profile is required for Decision Extraction", 503);
+    const profile = this.requireRecord(this.decisionExtraction.profileId);
+    if (profile.kind !== "openai-compatible") throw new ProviderLibraryError("Decision Extraction requires a Relay profile", 409);
+    return this.instantiate({ ...profile, activeModel: this.decisionExtraction.model }).provider.generate(request);
+  }
+
   getState(): ProviderLibraryState {
     const profiles = this.profiles.map(toView);
     const active = profiles.find(profile => profile.id === this.activeProfileId);
     if (!active) throw new ProviderLibraryError("Active provider profile not found", 500);
-    return { activeProfileId: this.activeProfileId, active, profiles };
+    const decisionProfile = this.decisionExtraction
+      ? profiles.find(profile => profile.id === this.decisionExtraction!.profileId)
+      : undefined;
+    const decisionExtraction = decisionProfile
+      ? { profileId: decisionProfile.id, profileName: decisionProfile.name, model: this.decisionExtraction!.model }
+      : null;
+    return { activeProfileId: this.activeProfileId, active, decisionExtraction, profiles };
   }
 
   getActiveRecord(): ProviderProfileRecord {
@@ -143,6 +181,7 @@ export class ProviderLibrary implements AIProvider {
     if (!record.name) throw new ProviderLibraryError("Profile name is required");
     if (!record.apiKey) throw new ProviderLibraryError("API key is required");
     this.profiles.push(record);
+    this.decisionExtraction ??= { profileId: record.id, model: record.activeModel };
     this.persist();
     return this.getState();
   }
@@ -177,6 +216,9 @@ export class ProviderLibrary implements AIProvider {
     const instance = this.instantiate(updated);
     if (id === this.activeProfileId) await instance.initialize();
     this.profiles[index] = updated;
+    if (this.decisionExtraction?.profileId === id && !models.includes(this.decisionExtraction.model)) {
+      this.decisionExtraction = { profileId: id, model: updated.activeModel };
+    }
     if (id === this.activeProfileId) this.activeInstance = instance;
     this.persist();
     return this.getState();
@@ -200,10 +242,21 @@ export class ProviderLibrary implements AIProvider {
     return this.getState();
   }
 
+  configureDecisionExtraction(profileId: string, model: string): ProviderLibraryState {
+    const profile = this.requireRecord(profileId);
+    if (profile.kind !== "openai-compatible") throw new ProviderLibraryError("Decision Extraction requires a Relay profile");
+    const selectedModel = model.trim();
+    if (!profile.models.includes(selectedModel)) throw new ProviderLibraryError("Decision Extraction model is not configured for this provider");
+    this.decisionExtraction = { profileId, model: selectedModel };
+    this.persist();
+    return this.getState();
+  }
+
   deleteProfile(id: string): ProviderLibraryState {
     const profile = this.requireRecord(id);
     if (profile.builtIn) throw new ProviderLibraryError("Built-in provider profiles cannot be deleted", 409);
     if (id === this.activeProfileId) throw new ProviderLibraryError("The active provider profile cannot be deleted", 409);
+    if (id === this.decisionExtraction?.profileId) throw new ProviderLibraryError("The Decision Extraction provider profile cannot be deleted", 409);
     this.profiles = this.profiles.filter(candidate => candidate.id !== id);
     this.persist();
     return this.getState();
@@ -228,9 +281,28 @@ export class ProviderLibrary implements AIProvider {
   private persist(): void {
     if (!this.storagePath) return;
     mkdirSync(dirname(this.storagePath), { recursive: true });
-    const data: PersistedProviderLibrary = { version: 1, activeProfileId: this.activeProfileId, profiles: this.profiles };
+    const data: PersistedProviderLibrary = {
+      version: 1,
+      activeProfileId: this.activeProfileId,
+      ...(this.decisionExtraction ? { decisionExtraction: this.decisionExtraction } : {}),
+      profiles: this.profiles
+    };
     writeFileSync(this.storagePath, `${JSON.stringify(data, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
   }
+}
+
+function selectDecisionExtraction(
+  profiles: ProviderProfileRecord[],
+  persisted: { profileId: string; model: string } | undefined
+): { profileId: string; model: string } | null {
+  const saved = profiles.find(profile =>
+    profile.id === persisted?.profileId
+    && profile.kind === "openai-compatible"
+    && profile.models.includes(persisted.model)
+  );
+  if (saved && persisted) return persisted;
+  const fallback = profiles.find(profile => profile.kind === "openai-compatible" && profile.models.includes(profile.activeModel));
+  return fallback ? { profileId: fallback.id, model: fallback.activeModel } : null;
 }
 
 export function createProviderProfile(input: Omit<ProviderProfileRecord, "createdAt" | "updatedAt">): ProviderProfileRecord {
@@ -249,7 +321,7 @@ function mergeProfiles(persisted: ProviderProfileRecord[], seeds: ProviderProfil
 }
 
 function selectInitialProfile(profiles: ProviderProfileRecord[], persistedActiveId: string | undefined, preferredKind: ProviderProfileKind): string {
-  const persisted = profiles.find(profile => profile.id === persistedActiveId && profile.kind === preferredKind);
+  const persisted = profiles.find(profile => profile.id === persistedActiveId);
   if (persisted) return persisted.id;
   const preferred = profiles.find(profile => profile.kind === preferredKind);
   if (preferred) return preferred.id;

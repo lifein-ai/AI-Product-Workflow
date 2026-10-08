@@ -10,6 +10,8 @@ test("Discovery Workspace serves its same-origin browser assets without server c
     const page = await app.inject({ method: "GET", url: "/" });
     const script = await app.inject({ method: "GET", url: "/app.js" });
     const guard = await app.inject({ method: "GET", url: "/submission-guard.js" });
+    const deletion = await app.inject({ method: "GET", url: "/project-deletion.js" });
+    const httpClient = await app.inject({ method: "GET", url: "/http-client.js" });
     const styles = await app.inject({ method: "GET", url: "/styles.css" });
 
     assert.equal(page.statusCode, 200);
@@ -24,6 +26,8 @@ test("Discovery Workspace serves its same-origin browser assets without server c
     assert.match(page.body, /Project files &amp; cleanup/);
     assert.match(page.body, /API &amp; Model Library/);
     assert.match(page.body, /AI Settings/);
+    assert.match(page.body, /ChatGPT Manual Bridge/);
+    assert.match(page.body, /Validate &amp; apply response/);
     assert.equal(script.statusCode, 200);
     assert.match(script.body, /\/projects\/\$\{state\.project\.id\}\/messages/);
     assert.match(script.body, /submissionGuard\.begin/);
@@ -37,10 +41,17 @@ test("Discovery Workspace serves its same-origin browser assets without server c
     assert.match(script.body, /artifacts\/cleanup/);
     assert.match(script.body, /renderSolutionSpec/);
     assert.match(script.body, /\/api\/providers/);
+    assert.match(script.body, /manual-bridge\/prompt/);
+    assert.match(script.body, /manual-bridge\/apply/);
+    assert.match(script.body, /expectedRecordVersion/);
     assert.match(script.body, /apiKeyMasked/);
     assert.doesNotMatch(script.body, /MODELFLARE_API_KEY|OPENAI_API_KEY/);
     assert.equal(guard.statusCode, 200);
     assert.match(guard.body, /Duplicate Request/);
+    assert.equal(deletion.statusCode, 200);
+    assert.match(deletion.body, /deletedProjectIds/);
+    assert.equal(httpClient.statusCode, 200);
+    assert.match(httpClient.body, /options\.body != null/);
     assert.equal(styles.statusCode, 200);
     assert.match(styles.body, /grid-template-columns/);
     assert.match(styles.body, /\[hidden\]\s*\{\s*display:\s*none\s*!important/);

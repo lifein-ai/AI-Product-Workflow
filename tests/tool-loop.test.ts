@@ -2,8 +2,14 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { AIProvider, ModelResponse } from "../src/ai/provider.js";
 import { createProjectRecord } from "../src/domain/factories.js";
+import { DISCOVERY_PROMPT } from "../src/prompts/discovery.js";
 import { runToolLoop } from "../src/runtime/tool-loop.js";
-import { stageRegistry } from "../src/workflow/stage-registry.js";
+import { modelTools } from "../src/tools/definitions.js";
+import {
+  DISCOVERY_CRITERION_IDS,
+  DISCOVERY_TOOL_NAME,
+  stageRegistry
+} from "../src/workflow/stage-registry.js";
 
 function readyEvaluation(status: "MISSING" | "NOT_APPLICABLE" = "MISSING") {
   return {
@@ -20,6 +26,74 @@ function turnResponse(args: Record<string, unknown>, callId = "turn"): ModelResp
     calls: [{ callId, name: "complete_discovery_turn", arguments: JSON.stringify(args) }]
   };
 }
+
+test("Discovery methodology and machine contract have one source for tool and criteria constants", () => {
+  assert.doesNotMatch(DISCOVERY_PROMPT, /complete_discovery_turn|update_product_spec|manage_open_question|record_decision|request_validation|\$decision:|assistantResponse|server/iu);
+  assert.equal(stageRegistry.DISCOVERY.modelTools[0], DISCOVERY_TOOL_NAME);
+  assert.equal(stageRegistry.DISCOVERY.exitCriteriaIds, DISCOVERY_CRITERION_IDS);
+
+  const completeTool = modelTools.find(tool => tool.name === DISCOVERY_TOOL_NAME) as any;
+  const updateOperation = completeTool.parameters.properties.operations.items.anyOf.find(
+    (operation: any) => operation.properties.kind.enum[0] === "update_product_spec"
+  );
+  const readyCriterionEnum = completeTool.parameters.properties.readyEvaluation.properties.criteria.items.properties.criterionId.enum;
+  const evaluateTool = modelTools.find(tool => tool.name === "evaluate_stage") as any;
+  const evaluateCriterionEnum = evaluateTool.parameters.properties.criteria.items.properties.criterionId.enum;
+
+  assert.equal(completeTool.name, DISCOVERY_TOOL_NAME);
+  assert.equal(readyCriterionEnum, DISCOVERY_CRITERION_IDS);
+  assert.equal(evaluateCriterionEnum, DISCOVERY_CRITERION_IDS);
+  assert.match(updateOperation.description, /Discovery shapes/);
+  assert.match(updateOperation.description, /ACCEPTED_ASSUMPTION.*evidenceStatus.*decisionId.*validationIntent/);
+  assert.doesNotMatch(updateOperation.description, /Solution shapes|keyMechanisms|mainProductFlow/);
+});
+
+test("initial Discovery request sends initialRequirement to the model exactly once", async () => {
+  const initialRequirement = "帮助主播提高真实互动";
+  const project = createProjectRecord("Initial context", initialRequirement);
+  let requestSnapshot: { instructions: string; input: unknown[] } | undefined;
+  const ai: AIProvider = { async generate(request) {
+    requestSnapshot = { instructions: request.instructions, input: [...request.input] };
+    return turnResponse({
+      expectedRevision: 0,
+      assistantResponse: "请补充最关键的使用场景。",
+      operations: [],
+      readyEvaluation: readyEvaluation()
+    });
+  } };
+
+  await runToolLoop(project, initialRequirement, ai);
+
+  assert.ok(requestSnapshot);
+  const modelInput = `${requestSnapshot.instructions}\n${JSON.stringify(requestSnapshot.input)}`;
+  assert.equal(modelInput.split(initialRequirement).length - 1, 1);
+  assert.equal((requestSnapshot.input[0] as { content: string }).content, initialRequirement);
+  assert.equal(project.productSpec.project.initialRequirement, initialRequirement);
+});
+
+test("later Discovery user messages remain in provider input", async () => {
+  const initialRequirement = "帮助主播提高真实互动";
+  const nextMessage = "主要面向刚开始直播的新主播";
+  const project = createProjectRecord("Later context", initialRequirement);
+  project.messages.push(
+    { id: "initial-user", role: "user", content: initialRequirement, createdAt: new Date().toISOString(), stage: "DISCOVERY" },
+    { id: "initial-assistant", role: "assistant", content: "请补充目标用户。", createdAt: new Date().toISOString(), stage: "DISCOVERY" }
+  );
+  let requestInput: unknown[] = [];
+  const ai: AIProvider = { async generate(request) {
+    requestInput = [...request.input];
+    return turnResponse({
+      expectedRevision: 0,
+      assistantResponse: "已了解目标用户。",
+      operations: [],
+      readyEvaluation: readyEvaluation()
+    });
+  } };
+
+  await runToolLoop(project, nextMessage, ai);
+
+  assert.equal((requestInput[0] as { content: string }).content, nextMessage);
+});
 
 test("normal Discovery turn uses one model call for response, operations, and Ready evaluation", async () => {
   const project = createProjectRecord("PK", "主播 PK");

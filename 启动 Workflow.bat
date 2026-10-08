@@ -9,29 +9,8 @@ echo ========================
 echo.
 echo AI Product Workflow
 echo.
-echo Select AI Provider:
-echo.
-echo 1. Local Codex
-echo 2. Relay API
-echo.
-set "providerChoice="
-set /p "providerChoice=Enter 1 or 2, then press Enter: "
->> "%startupLog%" echo Provider choice entered: %providerChoice%
-if "%providerChoice%"=="1" goto select_codex
-if "%providerChoice%"=="2" goto select_relay
-goto invalid_choice
-
-:select_codex
-set "AI_PROVIDER=codex"
-set "providerLabel=Codex Local"
->> "%startupLog%" echo Selected Codex Local
-goto check_common
-
-:select_relay
-set "AI_PROVIDER=relay"
-set "providerLabel=Relay"
->> "%startupLog%" echo Selected Relay
-goto check_common
+echo Using the last Provider selected in AI Settings.
+set "providerLabel=Saved AI Settings"
 
 :check_common
 where node >nul 2>nul
@@ -42,22 +21,11 @@ where pnpm >nul 2>nul
 >> "%startupLog%" echo pnpm check exit: %ERRORLEVEL%
 if errorlevel 1 goto pnpm_missing
 
-if /i "%AI_PROVIDER%"=="codex" goto check_codex
-goto check_port
-
-:check_codex
-set "OPENAI_API_KEY="
-set "CODEX_API_KEY="
-call codex --version >nul 2>nul
->> "%startupLog%" echo Codex version check exit: %ERRORLEVEL%
-if errorlevel 1 goto codex_missing
-
-call codex login status >nul 2>nul
->> "%startupLog%" echo Codex login check exit: %ERRORLEVEL%
-if errorlevel 1 goto codex_login_invalid
 goto check_port
 
 :check_port
+powershell.exe -NoProfile -Command "try { $health = Invoke-RestMethod -Uri 'http://127.0.0.1:3000/health' -TimeoutSec 2; if ($health.ok) { exit 0 } } catch {}; exit 1"
+if not errorlevel 1 goto already_running
 powershell.exe -NoProfile -Command "if (Get-NetTCPConnection -LocalPort 3000 -State Listen -ErrorAction SilentlyContinue) { exit 1 }"
 >> "%startupLog%" echo Port check exit: %ERRORLEVEL%
 if errorlevel 1 goto port_busy
@@ -71,7 +39,7 @@ echo ========================
 echo.
 
 :run_server
->> "%startupLog%" echo Starting pnpm dev with provider: %AI_PROVIDER%
+>> "%startupLog%" echo Starting pnpm start
 node "scripts\workflow-launcher.mjs"
 set "workflowExit=%ERRORLEVEL%"
 >> "%startupLog%" echo launcher monitor exit: %workflowExit%
@@ -80,11 +48,6 @@ if not "%workflowExit%"=="0" goto startup_failed
 echo Workflow stopped.
 pause
 exit /b 0
-
-:invalid_choice
->> "%startupLog%" echo Invalid provider choice
-echo [ERROR] Invalid selection. Enter 1 or 2.
-goto fail
 
 :node_missing
 >> "%startupLog%" echo Node missing
@@ -96,16 +59,11 @@ goto fail
 echo [ERROR] pnpm not found. Install pnpm and add pnpm to PATH.
 goto fail
 
-:codex_missing
->> "%startupLog%" echo Codex missing
-echo [ERROR] Codex CLI not found. Install Codex CLI and add codex to PATH.
-goto fail
-
-:codex_login_invalid
->> "%startupLog%" echo Codex login invalid
-echo [ERROR] Codex CLI login is invalid or expired.
-echo Run "codex login" in a terminal, finish login, and start this file again.
-goto fail
+:already_running
+>> "%startupLog%" echo Existing Workflow service is healthy
+echo Workflow is already running. Opening the browser.
+start "" "http://localhost:3000"
+exit /b 0
 
 :port_busy
 >> "%startupLog%" echo Port 3000 busy

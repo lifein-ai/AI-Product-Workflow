@@ -18,6 +18,9 @@ export class FigmaPromptService {
 
   async generate(projectId: string): Promise<{ artifact: FigmaPromptArtifactState; project: ProjectRecord }> {
     const project = await this.loadProject(projectId);
+    if (project.artifacts.figmaPrompt.lifecycleStatus === "CURRENT") {
+      throw new Error("Current Figma Prompt must be cleared before generating a replacement");
+    }
     const sourceContext = buildFigmaSourceContext(project);
     const plan = await this.runMetaAnalysis(sourceContext);
     const selectedIds = [plan.selection.baseId, ...plan.selection.domainCapabilityIds, ...plan.selection.supportCapabilityIds];
